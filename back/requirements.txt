@@ -1,0 +1,9 @@
+Django==5.2
+requests
+asgiref
+sqlparse
+djangorestframework
+gunicorn
+# psycopg2
+drf-spectacular
+python-dotenv

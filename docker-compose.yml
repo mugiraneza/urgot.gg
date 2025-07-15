@@ -1,0 +1,51 @@
+
+services:
+  db:
+    image: 'postgres:14.13-alpine3.20'
+    container_name: db
+    env_file: .env
+    environment:
+      - POSTGRES_DB=${POSTGRES_DBNAME}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASS}
+    volumes:
+      - dbdata:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DBNAME}"]
+      interval: 10s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  api:
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+    container_name: api
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "
+        python manage.py makemigrations &&
+        python manage.py migrate &&
+        gunicorn configuration.wsgi:application --bind 0.0.0.0:8000 --workers=3 --preload
+      "
+
+
+  # frontend:
+    # build:
+      # context: ./front
+      # dockerfile: Dockerfile
+      # target: runtime
+    # container_name: frontend
+    # depends_on:
+      # - api
+    # ports:
+      # - "80:80"
+
+volumes:
+  dbdata:
