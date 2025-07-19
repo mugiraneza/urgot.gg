@@ -1,21 +1,6 @@
 import os
 from pathlib import Path
 
-# Base de données PostgreSQL
-os.environ['POSTGRES_DBNAME']='lol_data_full'
-os.environ['POSTGRES_USER']='proctologue'
-os.environ['POSTGRES_PASS']='pifywug5'
-os.environ['POSTGRES_HOST']='db'
-os.environ['POSTGRES_PORT']='5432'
-
-# Django
-os.environ['DJANGO_SECRET_KEY']="j|X@C:hN$VuBzSMf|@ibw$WXO|U$hgtceIZKINr73KRacZ20wgen.R"
-os.environ['DJANGO_DEBUG']='True'
-os.environ['DJANGO_ALLOWED_HOSTS']='localhost,127.0.0.1'
-
-#  RIOT
-os.environ['RIOT_KEY']='RGAPI-7313bc89-dc8f-4e06-b75c-9055a5a8ddc8'
-
 
 SECRET_KEY =os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
