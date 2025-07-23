@@ -23,9 +23,13 @@ urlpatterns = [
     path("stats/global-modes-played-stat/", views.GameModesPlayedStatsView.as_view(),name='global-modes-played-stat'),
     path("stats/death-timeline-by-games-id-stat/", views.DeathTimelineView.as_view(),name='death-timeline-by-games-id-stat'),
     path("stats/game-duration-outcomes-distribution/", views.GameDurationOutcomeDistributionView.as_view(), name='game-duration-outcomes-distribution'),
+    path("stats/cs-per-minute-evolution/", views.CSPerMinuteEvolutionView.as_view(), name="cs-per-minute-evolution"),
     path("search/findusmmoner-name/", views.FindNewUsernameView.as_view(), name='findusmmoner-name'),
     path("map/death-map-image/", views.DeathMapImageView.as_view(), name="death-map-image"),
     path("map/death-map-image-single-summoner/", views.DeathMapImageByUserView.as_view(), name="death-map-image-single-summoner"),
+    path("graph/cs-per-minute-evolution/", views.CSPerMinuteGraphView.as_view(), name="graph-cs-per-minute-evolution"),
+    path("stats/avg-cs-per-min-last10/", views.AverageCsPerMinByChampionView.as_view(), name="avg-cs-per-min-last10"),
+    path("graph/cs-per-minute-evolution-last10/", views.CSPerMinuteLast10GamesGraphView.as_view(), name="graph/cs-per-minute-evolution-last10/"),
 
 
 ]

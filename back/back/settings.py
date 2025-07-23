@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from env import setEnv
+from back.env import setEnv
 
 setEnv()
 
