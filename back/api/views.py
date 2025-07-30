@@ -1,18 +1,21 @@
 # Create your views here.
-from .models import Match, Participant, Team, Ban, Objective, Death
+from .services.import_champions_items import import_champions, import_items
+from .services.riot_importer import run_match_import 
+from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
+from .models import Match, Participant, Team, Ban, Objective, Death,Item,Ability,Champion
 from .serializers import (
     MatchSerializer,
     ParticipantSerializer,
     TeamSerializer,
     BanSerializer,
     ObjectiveSerializer,
-    DeathSerializer
+    DeathSerializer,
+    ItemSerializer,
+    AbilitySerializer,
+    ChampionSerializer
 )
 import threading
-
 from threading import Thread
-from .services.riot_importer import run_match_import 
-from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
 from rest_framework import viewsets, views, status
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
@@ -24,13 +27,13 @@ import time
 from django.db.models import Sum, Count,Q
 
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 from io import BytesIO
 from django.http import HttpResponse
 
+matplotlib.use('Agg')
 
 running_imports = {}
 QUEUE_NAMES = {
@@ -101,6 +104,20 @@ class DeathViewSet(viewsets.ModelViewSet):
     queryset = Death.objects.all()
     serializer_class = DeathSerializer
 
+class ChampionViewSet(viewsets.ModelViewSet):
+    queryset = Champion.objects.all()
+    serializer_class = ChampionSerializer
+
+class AbilityViewSet(viewsets.ModelViewSet):
+    queryset = Ability.objects.all()
+    serializer_class = AbilitySerializer
+
+class ItemViewSet(viewsets.ModelViewSet):
+    queryset = Item.objects.all()
+    serializer_class = ItemSerializer
+
+#bloc des statistiques
+
 class TriggerMatchImportViewSet(views.APIView):
     """
     Déclenche l'importation d'un match depuis Riot Games via un thread.
@@ -135,7 +152,35 @@ class TriggerMatchImportViewSet(views.APIView):
             return Response({"message": f"Import lancé pour {riot_id} ({region})"}, status=202)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class TriggerChampImportViewSet(views.APIView):
+    """
+    Déclenche l'importation des champions et des items.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Lancer l'importation d'un match depuis Riot Games.",
+        responses={
+            202: openapi.Response(description="Import lancé avec succès."),
+            500: openapi.Response(description="Erreur serveur.")
+        }
+    )
+    def post(self, request, **kwargs):
+        try:
+            def import_champ_task():
+                import_champions()
+            def import_item_task():
+                import_items()
     
+            threading.Thread(target=import_champ_task).start()
+            threading.Thread(target=import_item_task).start()
+            # Thread(target=run_match_import, args=(riot_id, region)).start()
+            return Response({"message": f"Import lancé "}, status=202)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+  
+
+
 class ImportStatusView(views.APIView):
     @swagger_auto_schema(
         operation_description="Récupérer le statut d'import.",
