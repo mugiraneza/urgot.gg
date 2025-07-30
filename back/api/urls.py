@@ -9,12 +9,8 @@ router.register(r'basic/teams', views.TeamViewSet)
 router.register(r'basic/bans', views.BanViewSet)
 router.register(r'basic/objectives', views.ObjectiveViewSet)
 router.register(r'basic/deaths', views.DeathViewSet)
-router.register(r'basic/champions', views.ChampionViewSet)
-router.register(r'basic/abilities', views.AbilityViewSet)
-router.register(r'basic/items', views.ItemViewSet)
 urlpatterns = [
     path('', include(router.urls)),
-    path('import/import-champ-item/', views.TriggerChampImportViewSet.as_view(), name='import-champ-item'),  # note le `/` à la fin
     path('import/import-matches/', views.TriggerMatchImportViewSet.as_view(), name='import-matches'),  # note le `/` à la fin
     path('import/count-matches/', views.MatchcountViewSet.as_view(), name='count-matches'),  # idem ici
     path('import/import-status/', views.ImportStatusView.as_view(), name='import-status'),  # idem ici
