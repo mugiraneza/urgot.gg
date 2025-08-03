@@ -3,14 +3,15 @@ from rest_framework.routers import DefaultRouter
 from . import views
 
 router = DefaultRouter()    
-router.register(r'basic/matches', views.MatchViewSet)
-router.register(r'basic/participants', views.ParticipantViewSet)
-router.register(r'basic/teams', views.TeamViewSet)
-router.register(r'basic/bans', views.BanViewSet)
-router.register(r'basic/objectives', views.ObjectiveViewSet)
-router.register(r'basic/deaths', views.DeathViewSet)
+# router.register(r'basic/matches', views.MatchViewSet)
+# router.register(r'basic/participants', views.ParticipantViewSet)
+# router.register(r'basic/teams', views.TeamViewSet)
+# router.register(r'basic/bans', views.BanViewSet)
+# router.register(r'basic/objectives', views.ObjectiveViewSet)
+# router.register(r'basic/deaths', views.DeathViewSet)
 urlpatterns = [
     path('', include(router.urls)),
+    path('import/import-champs-items/', views.TriggerChampionItemImportViewSet.as_view(), name='import-champs-items'),  # note le `/` à la fin
     path('import/import-matches/', views.TriggerMatchImportViewSet.as_view(), name='import-matches'),  # note le `/` à la fin
     path('import/count-matches/', views.MatchcountViewSet.as_view(), name='count-matches'),  # idem ici
     path('import/import-status/', views.ImportStatusView.as_view(), name='import-status'),  # idem ici

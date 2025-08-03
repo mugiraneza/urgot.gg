@@ -1,7 +1,8 @@
 # Create your views here.
 from .services.riot_importer import run_match_import 
+from .services.import_champions_items import RiotDataImporter
 from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
-from .models import Match, Participant, Team, Ban, Objective, Death,Item,Ability,Champion
+from .models import *
 from .serializers import (
     MatchSerializer,
     ParticipantSerializer,
@@ -19,12 +20,9 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from datetime import datetime, timedelta
 from collections import defaultdict
-import time
-from django.db.models import Sum, Count,Q
 
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import numpy as np
 from io import BytesIO
 from django.http import HttpResponse
@@ -101,7 +99,6 @@ class DeathViewSet(viewsets.ModelViewSet):
     serializer_class = DeathSerializer
 
 #bloc des statistiques
-
 class TriggerMatchImportViewSet(views.APIView):
     """
     Déclenche l'importation d'un match depuis Riot Games via un thread.
@@ -136,7 +133,6 @@ class TriggerMatchImportViewSet(views.APIView):
             return Response({"message": f"Import lancé pour {riot_id} ({region})"}, status=202)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class ImportStatusView(views.APIView):
     @swagger_auto_schema(
@@ -1356,3 +1352,52 @@ class AverageCsPerMinByChampionView(views.APIView):
 
         return Response(result, status=200)
 
+
+class TriggerChampionItemImportViewSet(views.APIView):
+    """
+    Déclenche l'importation des champions et/ou items depuis Riot Games via un thread.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Lancer l'importation des champions et/ou des items depuis Riot Games.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=[],
+            properties={
+                "champions": openapi.Schema(
+                    type=openapi.TYPE_BOOLEAN,
+                    description="Importer les champions ? (true/false)"
+                ),
+                "items": openapi.Schema(
+                    type=openapi.TYPE_BOOLEAN,
+                    description="Importer les items ? (true/false)"
+                ),
+            },
+        ),
+        responses={
+            202: openapi.Response(description="Import lancé avec succès."),
+            500: openapi.Response(description="Erreur serveur.")
+        }
+    )
+    def post(self, request, **kwargs):
+        champions = request.data.get("champions", False)
+        items = request.data.get("items", False)
+
+        try:
+            def import_task():
+                importer = RiotDataImporter()
+                if champions:
+                    importer.import_champions()
+                if items:
+                    importer.import_items()
+
+            thread = threading.Thread(target=import_task)
+            thread.start()
+
+            return Response(
+                {"message": "Import lancé en arrière-plan", "champions": champions, "items": items},
+                status=status.HTTP_202_ACCEPTED
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
