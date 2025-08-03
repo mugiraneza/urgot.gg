@@ -2,7 +2,7 @@ import os
 import time
 import requests
 from typing import Dict, List, Tuple
-from api.models import Match, Participant, Team, Ban, Objective, Death
+from api.models import Match, Participant, Team, Ban, Objective, Death,Item,Champion
 
 RIOT_API_KEY = os.getenv("RIOT_KEY")
 MAX_MATCHES = int(1000)
@@ -45,6 +45,16 @@ def get_all_match_ids(puuid: str, region: str, total: int = MAX_MATCHES) -> List
         start += step
         time.sleep(DELAY_SEC)
     return ids[:total]
+
+def get_item_id(item_id):
+    if item_id is None:
+        return None
+    return Item.objects.filter(item_id=str(item_id)).first()
+
+def get_champion_id(champion_id):
+    if champion_id is None:
+        return None
+    return Champion.objects.filter(champion_id=str(champion_id)).first()
 
 def get_match(mid: str, region: str) -> Dict:
     return _get_json(f"https://{region}.api.riotgames.com/lol/match/v5/matches/{mid}")
@@ -90,7 +100,7 @@ def insert_teams(mid: str, teams: List[Dict]):
                 match=match,
                 team_id=t["teamId"],
                 pick_turn=b["pickTurn"],
-                champion_id=b["championId"],
+                champion_id=get_item_id(b["championId"]),
             )
         for typ, data in obj.items():
             Objective.objects.get_or_create(
@@ -110,7 +120,7 @@ def insert_participants(mid: str, participants: List[Dict]):
                 "puuid": p["puuid"],
                 "riot_name": f"{p['riotIdGameName']}#{p['riotIdTagline']}",
                 "team_id": p["teamId"],
-                "champion_id": p["championId"],
+                "champion_id": get_champion_id(p["championId"]),
                 "champion_name": p["championName"],
                 "individual_position": p["individualPosition"],
                 "role": p["role"],
@@ -131,13 +141,13 @@ def insert_participants(mid: str, participants: List[Dict]):
                 "total_minions_killed": p["totalMinionsKilled"],
                 "neutral_minions_killed": p["neutralMinionsKilled"],
                 "time_ccing_others": p["timeCCingOthers"],
-                "item0": p["item0"],
-                "item1": p["item1"],
-                "item2": p["item2"],
-                "item3": p["item3"],
-                "item4": p["item4"],
-                "item5": p["item5"],
-                "item6": p["item6"],
+                "item0": get_item_id(p["item0"]),
+                "item1": get_item_id(p["item1"]),
+                "item2": get_item_id(p["item2"]),
+                "item3": get_item_id(p["item3"]),
+                "item4": get_item_id(p["item4"]),
+                "item5": get_item_id(p["item5"]),
+                "item6": get_item_id(p["item6"]),
                 "gold_earned": p["goldEarned"],
                 "gold_spent": p["goldSpent"],
                 "champ_level": p["champLevel"],

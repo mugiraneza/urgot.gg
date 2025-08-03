@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Match, Participant, Team, Ban, Objective, Death
+from .models import *
 
 class MatchSerializer(serializers.ModelSerializer):
     class Meta:
@@ -53,3 +53,5 @@ class DeathSerializer(serializers.ModelSerializer):
     class Meta:
         model = Death
         fields = '__all__'
+
+

@@ -1,18 +1,18 @@
 # Create your views here.
-from .models import Match, Participant, Team, Ban, Objective, Death
+from .services.riot_importer import run_match_import 
+from .services.import_champions_items import RiotDataImporter
+from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
+from .models import *
 from .serializers import (
     MatchSerializer,
     ParticipantSerializer,
     TeamSerializer,
     BanSerializer,
     ObjectiveSerializer,
-    DeathSerializer
+    DeathSerializer,
 )
 import threading
-
 from threading import Thread
-from .services.riot_importer import run_match_import 
-from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
 from rest_framework import viewsets, views, status
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
@@ -20,15 +20,14 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from datetime import datetime, timedelta
 from collections import defaultdict
-import time
-from django.db.models import Sum, Count,Q
 
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
 from io import BytesIO
 from django.http import HttpResponse
 
+matplotlib.use('Agg')
 
 running_imports = {}
 QUEUE_NAMES = {
@@ -99,6 +98,7 @@ class DeathViewSet(viewsets.ModelViewSet):
     queryset = Death.objects.all()
     serializer_class = DeathSerializer
 
+#bloc des statistiques
 class TriggerMatchImportViewSet(views.APIView):
     """
     Déclenche l'importation d'un match depuis Riot Games via un thread.
@@ -108,9 +108,9 @@ class TriggerMatchImportViewSet(views.APIView):
         operation_description="Lancer l'importation d'un match depuis Riot Games.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["id", "region"],
+            required=["riot_id", "region"],
             properties={
-                "id": openapi.Schema(type=openapi.TYPE_STRING, description="Riot ID du joueur (ex: proctologue#urgot)"),
+                "riot_id": openapi.Schema(type=openapi.TYPE_STRING, description="Riot ID du joueur (ex: proctologue#urgot)"),
                 "region": openapi.Schema(type=openapi.TYPE_STRING, description="Région du joueur (ex: europe)"),
             },
         ),
@@ -124,7 +124,7 @@ class TriggerMatchImportViewSet(views.APIView):
             def import_task():
                 run_match_import(riot_id, region)
                 running_imports.pop(riot_id, None)  
-            riot_id = request.data.get("id", "proctologue#urgot")
+            riot_id = request.data.get("riot_id", "proctologue#urgot")
             region = request.data.get("region", "europe")
             thread = threading.Thread(target=import_task)
             thread.start()
@@ -133,7 +133,7 @@ class TriggerMatchImportViewSet(views.APIView):
             return Response({"message": f"Import lancé pour {riot_id} ({region})"}, status=202)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+
 class ImportStatusView(views.APIView):
     @swagger_auto_schema(
         operation_description="Récupérer le statut d'import.",
@@ -1077,3 +1077,327 @@ class DeathMapImageByUserView(views.APIView):
         buffer.seek(0)
 
         return HttpResponse(buffer.read(), content_type='image/png')
+
+class CSPerMinuteEvolutionView(views.APIView):
+    """
+    Retourne l'évolution des CS par minute pour un joueur donné, avec options de filtre par poste et champion.
+    """
+    @swagger_auto_schema(
+        operation_description="Retourne l'évolution des CS/min pour un joueur, avec filtre possible par poste et champion.",
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+            openapi.Parameter("position", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Poste joué (TOP, JUNGLE, etc.)"),
+            openapi.Parameter("champion_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom du champion (ex: Darius)"),
+        ]
+    )
+    def get(self, request):
+        puuid = request.GET.get("puuid")
+        riot_name = request.GET.get("riot_name")
+        position = request.GET.get("position", "").upper()
+        champion_name = request.GET.get("champion_name", "")
+
+        if not puuid and not riot_name:
+            return Response({"error": "Veuillez fournir 'puuid' ou 'riot_name'."}, status=400)
+
+        filters = {}
+        if puuid:
+            filters["puuid"] = puuid
+        else:
+            filters["riot_name__iexact"] = riot_name
+
+        if position:
+            filters["team_position__iexact"] = position
+        if champion_name:
+            filters["champion_name__iexact"] = champion_name
+
+        participants = Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+
+        if not participants.exists():
+            return Response({"message": "Aucune donnée trouvée."}, status=200)
+
+        result = []
+        for p in participants:
+            cs_total = p.total_minions_killed + p.neutral_minions_killed
+            time_minutes = p.time_played / 60 if p.time_played else 1
+            cs_per_min = cs_total / time_minutes
+
+            result.append({
+                "match_id": p.match.match_id,
+                "date": datetime.fromtimestamp(p.match.game_creation / 1000).strftime('%Y-%m-%d %H:%M'),
+                "champion": p.champion_name,
+                "cs": cs_total,
+                "cs_objectif_7":round(time_minutes, 0)*7,
+                "cs_objectif_8":round(time_minutes, 0)*8,
+                "cs_objectif_9":round(time_minutes, 0)*9,
+                "cs_objectif_10":round(time_minutes, 0)*10,
+                "duration_min": round(time_minutes, 2),
+                "cs_per_min": round(cs_per_min, 2),
+                "position": p.team_position
+            })
+
+        return Response(result, status=200)
+
+class CSPerMinuteGraphView(views.APIView): 
+    """
+    Affiche un graphique de l'évolution des CS par minute pour un joueur donné,
+    avec filtres facultatifs par poste et champion, sans chevauchement des points.
+    """
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+            openapi.Parameter("position", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Poste joué (TOP, JUNGLE, etc.)"),
+            openapi.Parameter("champion_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom du champion (ex: Darius)"),
+        ]
+    )
+    def get(self, request):
+        puuid = request.GET.get("puuid")
+        riot_name = request.GET.get("riot_name")
+        position = request.GET.get("position", "").upper()
+        champion_name = request.GET.get("champion_name", "")
+
+        if not puuid and not riot_name:
+            return HttpResponse("Veuillez fournir 'puuid' ou 'riot_name'", status=400)
+
+        filters = {}
+        if puuid:
+            filters["puuid"] = puuid
+        else:
+            filters["riot_name__iexact"] = riot_name
+        if position:
+            filters["team_position__iexact"] = position
+        if champion_name:
+            filters["champion_name__iexact"] = champion_name
+
+        participants = Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+        if not participants.exists():
+            return HttpResponse("Aucune donnée trouvée.", status=404)
+
+        # Préparation des données
+        cs_per_min_values = []
+        labels = []
+
+        for p in participants:
+            if p.time_played < 600:
+                continue  # on ignore les parties de moins de 10 min
+
+            time_minutes = p.time_played / 60
+            cs_total = p.total_minions_killed + p.neutral_minions_killed
+            cs_per_min = cs_total / time_minutes
+
+            match_time = datetime.fromtimestamp(p.match.game_creation / 1000)
+            cs_per_min_values.append(cs_per_min)
+            labels.append(f"{match_time.strftime('%d/%m')}")
+
+        if not cs_per_min_values:
+            return HttpResponse("Aucune partie >10min trouvée.", status=200)
+
+        x_indexes = list(range(1, len(cs_per_min_values) + 1))
+
+        # Tracé
+        plt.figure(figsize=(30, 6))
+        plt.plot(x_indexes, cs_per_min_values, marker='o', linestyle='-', linewidth=2, color="#1f77b4", label="CS/min")
+        plt.fill_between(x_indexes, cs_per_min_values, alpha=0.1, color="#1f77b4")
+
+        # Moyenne
+        avg_value = np.mean(cs_per_min_values)
+        plt.axhline(avg_value, color='gray', linestyle='--', linewidth=1, label=f"Moyenne : {avg_value:.2f}")
+
+        plt.xticks(x_indexes, labels, rotation=45, ha='right', fontsize=9)
+        plt.title("Évolution des CS/min par partie", fontsize=14)
+        plt.xlabel("Date", fontsize=12)
+        plt.ylabel("CS par minute", fontsize=12)
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend()
+        plt.tight_layout()
+
+        # Export PNG
+        buffer = BytesIO()
+        plt.savefig(buffer, format="png")
+        plt.close()
+        buffer.seek(0)
+
+        return HttpResponse(buffer.read(), content_type="image/png")
+
+class CSPerMinuteLast10GamesGraphView(views.APIView):
+    """
+    Graphique de l’évolution des CS/min pour un joueur, sans superposition (1 point par partie).
+    """
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+            openapi.Parameter("position", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Poste joué (TOP, JUNGLE, etc.)"),
+            openapi.Parameter("champion_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom du champion (ex: Darius)"),
+            openapi.Parameter("nb_game", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Nombre de parties"),
+        ]
+    )
+    def get(self, request):
+        puuid = request.GET.get("puuid")
+        riot_name = request.GET.get("riot_name")
+        position = request.GET.get("position", "").upper()
+        champion_name = request.GET.get("champion_name", "")
+        nb_game = int(request.GET.get("nb_game", 10))
+
+        if not puuid and not riot_name:
+            return HttpResponse("Veuillez fournir 'puuid' ou 'riot_name'", status=400)
+
+        filters = {}
+        if puuid:
+            filters["puuid"] = puuid
+        else:
+            filters["riot_name__iexact"] = riot_name
+        if position:
+            filters["team_position__iexact"] = position
+        if champion_name:
+            filters["champion_name__iexact"] = champion_name
+
+        participants = Participant.objects.filter(**filters).select_related("match").order_by("-match__game_creation")[:nb_game * 2]
+        if not participants.exists():
+            return HttpResponse("Aucune donnée trouvée.", status=404)
+
+        # Garde seulement les parties de plus de 10 minutes
+        filtered_participants = []
+        for p in participants:
+            if p.time_played >= 600:
+                filtered_participants.append(p)
+            if len(filtered_participants) == nb_game:
+                break
+        if not filtered_participants:
+            return Response({"message": "Aucune partie valide (>10min) trouvée."}, status=200)
+
+        cs_per_min_values = []
+        labels = []
+
+        for p in reversed(filtered_participants):  # ancien -> récent
+            time_minutes = p.time_played / 60
+            cs_total = p.total_minions_killed + p.neutral_minions_killed
+            cs_per_min = cs_total / time_minutes
+            date_str = datetime.fromtimestamp(p.match.game_creation / 1000).strftime("%d/%m")
+            cs_per_min_values.append(cs_per_min)
+            labels.append(f"{p.champion_name}\n{date_str}")
+
+        x_indexes = list(range(1, len(cs_per_min_values) + 1))
+
+        # --- Matplotlib Styling ---
+        plt.figure(figsize=(14, 6))
+        plt.plot(x_indexes, cs_per_min_values, marker='o', linestyle='-', linewidth=2, color="#1f77b4", label="CS/min")
+        plt.fill_between(x_indexes, cs_per_min_values, alpha=0.1, color="#1f77b4")
+
+        avg_cs = np.mean(cs_per_min_values)
+        plt.axhline(avg_cs, linestyle='--', color='gray', linewidth=1, label=f"Moyenne : {avg_cs:.2f}")
+
+        plt.xticks(x_indexes, labels, rotation=45, ha="right", fontsize=9)
+        plt.title("Évolution des CS/min sur les 10 dernières parties (>10min)", fontsize=14)
+        plt.xlabel("Partie (Champion & Date)")
+        plt.ylabel("CS par minute")
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend()
+        plt.tight_layout()
+
+        buffer = BytesIO()
+        plt.savefig(buffer, format="png")
+        plt.close()
+        buffer.seek(0)
+
+        return HttpResponse(buffer.read(), content_type="image/png")
+
+class AverageCsPerMinByChampionView(views.APIView):
+    """
+    Retourne la moyenne des CS/min par champion sur les 10 dernières parties d’un joueur donné.
+    """
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+        ]
+    )
+    def get(self, request):
+        puuid = request.GET.get("puuid")
+        riot_name = request.GET.get("riot_name")
+
+        if not puuid and not riot_name:
+            return Response({"error": "Veuillez fournir 'puuid' ou 'riot_name'."}, status=400)
+
+        filters = {}
+        if puuid:
+            filters["puuid"] = puuid
+        else:
+            filters["riot_name__iexact"] = riot_name
+
+        participants = Participant.objects.filter(**filters).select_related("match").order_by("-match__game_creation")[:10]
+
+        if not participants.exists():
+            return Response({"message": "Aucune donnée trouvée."}, status=200)
+
+        champ_stats = defaultdict(lambda: {"cs": 0, "duration": 0, "games": 0})
+
+        for p in participants:
+            cs_total = p.total_minions_killed + p.neutral_minions_killed
+            time_minutes = p.time_played / 60 if p.time_played else 1
+
+            champ_stats[p.champion_name]["cs"] += cs_total
+            champ_stats[p.champion_name]["duration"] += time_minutes
+            champ_stats[p.champion_name]["games"] += 1
+
+        result = {}
+        for champ, stats in champ_stats.items():
+            if stats["duration"] > 0:
+                avg_cs_per_min = stats["cs"] / stats["duration"]
+                result[champ] = {
+                    "games": stats["games"],
+                    "avg_cs_per_min": round(avg_cs_per_min, 2)
+                }
+
+        return Response(result, status=200)
+
+
+class TriggerChampionItemImportViewSet(views.APIView):
+    """
+    Déclenche l'importation des champions et/ou items depuis Riot Games via un thread.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Lancer l'importation des champions et/ou des items depuis Riot Games.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=[],
+            properties={
+                "champions": openapi.Schema(
+                    type=openapi.TYPE_BOOLEAN,
+                    description="Importer les champions ? (true/false)"
+                ),
+                "items": openapi.Schema(
+                    type=openapi.TYPE_BOOLEAN,
+                    description="Importer les items ? (true/false)"
+                ),
+            },
+        ),
+        responses={
+            202: openapi.Response(description="Import lancé avec succès."),
+            500: openapi.Response(description="Erreur serveur.")
+        }
+    )
+    def post(self, request, **kwargs):
+        champions = request.data.get("champions", False)
+        items = request.data.get("items", False)
+
+        try:
+            def import_task():
+                importer = RiotDataImporter()
+                if champions:
+                    importer.import_champions()
+                if items:
+                    importer.import_items()
+
+            thread = threading.Thread(target=import_task)
+            thread.start()
+
+            return Response(
+                {"message": "Import lancé en arrière-plan", "champions": champions, "items": items},
+                status=status.HTTP_202_ACCEPTED
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
