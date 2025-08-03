@@ -51,10 +51,10 @@ def get_item_id(item_id):
         return None
     return Item.objects.filter(item_id=str(item_id)).first()
 
-def get_champion_id(champion_id):
-    if champion_id is None:
+def get_champion_id(champion_name):
+    if champion_name is None:
         return None
-    return Champion.objects.filter(champion_id=str(champion_id)).first()
+    return Champion.objects.filter(name=str(champion_name)).first()
 
 def get_match(mid: str, region: str) -> Dict:
     return _get_json(f"https://{region}.api.riotgames.com/lol/match/v5/matches/{mid}")
@@ -100,7 +100,7 @@ def insert_teams(mid: str, teams: List[Dict]):
                 match=match,
                 team_id=t["teamId"],
                 pick_turn=b["pickTurn"],
-                champion_id=get_item_id(b["championId"]),
+                champion=get_champion_id(b["championId"]),
             )
         for typ, data in obj.items():
             Objective.objects.get_or_create(
@@ -180,10 +180,6 @@ def insert_deaths(mid: str, timeline: Dict):
 def run_match_import(riot_id: str, region: str):
     if not RIOT_API_KEY:
         raise RuntimeError("RIOT_API_KEY manquante.")
-
-    print(RIOT_API_KEY)
-    print(riot_id)
-    print(region)
     name, tag = split_riot_id(riot_id)
     puuid = get_puuid(name, tag, region)
 

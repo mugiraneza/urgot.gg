@@ -111,7 +111,7 @@ class TriggerMatchImportViewSet(views.APIView):
             required=["riot_id", "region"],
             properties={
                 "riot_id": openapi.Schema(type=openapi.TYPE_STRING, description="Riot ID du joueur (ex: proctologue#urgot)"),
-                "region": openapi.Schema(type=openapi.TYPE_STRING, description="Région du joueur (ex: europe)"),
+                "region": openapi.Schema(type=openapi.TYPE_STRING, description="Région du joueur (ex: europe,americas,asia,sea)"),
             },
         ),
         responses={
@@ -911,13 +911,16 @@ class FindNewUsernameView(views.APIView):
         }
     )
     def get(self, request):
-        puuid = request.GET.get("puuid")
-        region = request.GET.get("region")
-        if not puuid :
-            return Response({"status": "veuillez rajouter puuid dans le GET"}, status=200)
-        resultat = get_riot_id_by_puuid(puuid,region)
-        return Response({"summoner_name": "#".join(resultat)}, status=200)
-    
+        try:
+            puuid = request.GET.get("puuid")
+            region = request.GET.get("region")
+            if not puuid :
+                return Response({"status": "veuillez rajouter puuid dans le GET"}, status=200)
+            resultat = get_riot_id_by_puuid(puuid,region)
+            return Response({"summoner_name": "#".join(resultat)}, status=200)
+        except:
+            return Response({"status": "une erreur a eu lieu"}, status=404)
+
 class DeathMapImageView(views.APIView):
     @swagger_auto_schema(
         operation_description="Retourne, pour un match donné, l'évolution des morts groupées par minute pour chaque joueur avec coordonnées (x, y).",

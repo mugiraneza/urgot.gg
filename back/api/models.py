@@ -371,7 +371,7 @@ class Ban(models.Model):
     match = models.ForeignKey(Match, on_delete=models.CASCADE)
     team_id = models.IntegerField()
     pick_turn = models.IntegerField()
-    champion_id = models.ForeignKey(Champion, on_delete=models.SET_NULL, null=True, related_name='bans')
+    champion = models.ForeignKey(Champion, on_delete=models.SET_NULL, null=True, related_name='bans')
 
     class Meta:
         unique_together = ('match', 'team_id', 'pick_turn')
