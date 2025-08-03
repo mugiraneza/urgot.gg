@@ -212,6 +212,7 @@ class RiotDataImporter:
                     champion, created = Champion.objects.update_or_create(
                         champion_id=champion_id,
                         defaults={
+                            'champion_id' : champion_details['key'],
                             'key': champion_details['key'],
                             'name': champion_details['name'],
                             'title': champion_details['title'],
