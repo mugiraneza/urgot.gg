@@ -51,10 +51,16 @@ def get_item_id(item_id):
         return None
     return Item.objects.filter(item_id=str(item_id)).first()
 
-def get_champion_id(champion_name):
-    if champion_name is None:
+def get_champion_obj(champion_id):
+    if champion_id is None:
         return None
-    return Champion.objects.filter(name=str(champion_name)).first()
+    return Champion.objects.filter(champion_id=str(champion_id)).first()
+
+def get_champion_id(champion_id):
+    if champion_id is None:
+        return None
+    champ = Champion.objects.filter(champion_id=str(champion_id)).first()
+    return champ.pk if champ else None
 
 def get_match(mid: str, region: str) -> Dict:
     return _get_json(f"https://{region}.api.riotgames.com/lol/match/v5/matches/{mid}")
@@ -100,8 +106,9 @@ def insert_teams(mid: str, teams: List[Dict]):
                 match=match,
                 team_id=t["teamId"],
                 pick_turn=b["pickTurn"],
-                champion=get_champion_id(b["championId"]),
+                champion=get_champion_obj(b["championId"]),
             )
+            # print(get_champion_obj(b["championId"]))
         for typ, data in obj.items():
             Objective.objects.get_or_create(
                 match=match,

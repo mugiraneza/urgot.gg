@@ -65,6 +65,16 @@ class Participant(models.Model):
         unique_together = ('match', 'participant_id')
 
 
+class Ban(models.Model):
+    match = models.ForeignKey(Match, on_delete=models.CASCADE)
+    team_id = models.IntegerField()
+    pick_turn = models.IntegerField()
+    champion = models.ForeignKey('Champion', on_delete=models.SET_NULL, null=True, related_name='bans')
+
+    class Meta:
+        unique_together = ('match', 'team_id', 'pick_turn')
+
+
 class Team(models.Model):
     match = models.ForeignKey(Match, on_delete=models.CASCADE)
     team_id = models.IntegerField()
@@ -366,12 +376,3 @@ class ItemInto(models.Model):
         db_table = 'item_into'
         unique_together = ('item', 'into_item_id')
 
-
-class Ban(models.Model):
-    match = models.ForeignKey(Match, on_delete=models.CASCADE)
-    team_id = models.IntegerField()
-    pick_turn = models.IntegerField()
-    champion = models.ForeignKey(Champion, on_delete=models.SET_NULL, null=True, related_name='bans')
-
-    class Meta:
-        unique_together = ('match', 'team_id', 'pick_turn')
