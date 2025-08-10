@@ -3,6 +3,7 @@ from django.db import models
 
 class Match(models.Model):
     match_id = models.CharField(primary_key=True, max_length=100)
+    game_region=models.CharField(max_length=10, null=True, blank=True, db_index=True)
     game_creation = models.BigIntegerField()
     game_end_ts = models.BigIntegerField()
     game_duration = models.IntegerField()
@@ -13,6 +14,11 @@ class Match(models.Model):
     queue_id = models.IntegerField()
     tournament_code = models.CharField(max_length=100, blank=True, null=True)
 
+    def save(self, *args, **kwargs):
+        if self.match_id:
+            self.game_region = self.match_id.split('_', 1)[0]
+        super().save(*args, **kwargs)
+        
     def __str__(self):
         return self.match_id
 
