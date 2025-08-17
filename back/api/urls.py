@@ -29,7 +29,6 @@ urlpatterns = [
     path("map/death-map-image-single-summoner/", views.DeathMapImageByUserView.as_view(), name="death-map-image-single-summoner"),
     path("graph/cs-per-minute-evolution/", views.CSPerMinuteGraphView.as_view(), name="graph-cs-per-minute-evolution"),
     path("stats/avg-cs-per-min-last10/", views.AverageCsPerMinByChampionView.as_view(), name="avg-cs-per-min-last10"),
-    path("graph/cs-per-minute-evolution-last10/", views.CSPerMinuteLast10GamesGraphView.as_view(), name="graph/cs-per-minute-evolution-last10/"),
-
-
+    path("graph/cs-per-minute-evolution-last10/", views.CSPerMinuteLast10GamesGraphView.as_view(), name="graph/cs-per-minute-evolution-last10"),
+    path("export/export-matches-csv/", views.ExportMatchesCSVView.as_view(), name="export/export-matches-csv"),
 ]

@@ -25,11 +25,13 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from io import BytesIO
-from django.http import HttpResponse
-
+from django.http import HttpResponse, StreamingHttpResponse
+import csv
 matplotlib.use('Agg')
 
+#region variable globale
 running_imports = {}
+SIDE_MAP = {100: "BLUE", 200: "RED"}
 QUEUE_NAMES = {
     400: "Normal Blind Pick",
     420: "Ranked Solo/Duo",
@@ -55,6 +57,8 @@ QUEUE_NAMES = {
     2010: "Tutorial 2",
     2020: "Tutorial 3",
 }
+
+#EndOfRegion Variable Global
 
 class MatchViewSet(viewsets.ModelViewSet):
     """
@@ -1013,7 +1017,6 @@ class DeathMapImageView(views.APIView):
 
         return HttpResponse(buffer.read(), content_type='image/png')
 
-
 class DeathMapImageByUserView(views.APIView):
     @swagger_auto_schema(
         operation_description="Affiche la carte des morts d’un joueur pour un match donné.",
@@ -1355,7 +1358,6 @@ class AverageCsPerMinByChampionView(views.APIView):
 
         return Response(result, status=200)
 
-
 class TriggerChampionItemImportViewSet(views.APIView):
     """
     Déclenche l'importation des champions et/ou items depuis Riot Games via un thread.
@@ -1404,3 +1406,113 @@ class TriggerChampionItemImportViewSet(views.APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _compose_row(user_p, all_participants):
+    """Construit une ligne CSV pour le participant utilisateur."""
+    match = user_p.match
+
+    allies = [p for p in all_participants if p.team_id == user_p.team_id and p.participant_id != user_p.participant_id]
+    enemies = [p for p in all_participants if p.team_id != user_p.team_id]
+
+    allies_sorted = sorted(allies, key=lambda x: x.participant_id)[:4]
+    enemies_sorted = sorted(enemies, key=lambda x: x.participant_id)[:5]
+
+    ts_utc = datetime.fromtimestamp(match.game_creation / 1000).isoformat() + "Z"
+
+    row = {
+        "match_id": match.match_id,
+        "timestamp_utc": ts_utc,
+        "win": 1 if user_p.win else 0,
+        "queue_type": str(match.queue_id),
+        "patch": match.game_version,
+        "duration_sec": match.game_duration or user_p.time_played,
+        "side": SIDE_MAP.get(user_p.team_id, "UNKNOWN"),
+        "rank_tier": "",
+        "lane": (user_p.team_position or user_p.individual_position or "UNKNOWN").upper(),
+        "champion": user_p.champion_name,
+        "k": user_p.kills, "d": user_p.deaths, "a": user_p.assists,
+        "cs": user_p.total_minions_killed + user_p.neutral_minions_killed,
+        "gold": user_p.gold_earned,
+        "vision_score": user_p.vision_score,
+    }
+
+    for i, ally in enumerate(allies_sorted, start=1):
+        row[f"ally_champ{i}"] = ally.champion_name
+    for i in range(len(allies_sorted) + 1, 5):
+        row[f"ally_champ{i}"] = ""
+
+    for i, enemy in enumerate(enemies_sorted, start=1):
+        row[f"enemy_champ{i}"] = enemy.champion_name
+    for i in range(len(enemies_sorted) + 1, 6):
+        row[f"enemy_champ{i}"] = ""
+
+    row.update({
+        "kills_10": "", "deaths_10": "", "assists_10": "",
+        "gold_10": "", "cs_10": ""
+    })
+    return row
+
+class ExportMatchesCSVView(views.APIView):
+    # permission_classes = [IsAuthenticatedOrReadOnly]
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur")
+        ],
+        responses={200: openapi.Response(description="export les partie en csv pour train une ia")}
+    )
+    def get(self, request):
+        puuid = request.GET.get("puuid")
+        riot_name = request.GET.get("riot_name")
+        if not puuid and not riot_name:
+            return StreamingHttpResponse("Missing puuid or riot_name", status=400)
+
+        filters = {}
+        if puuid:
+            filters["puuid"] = puuid
+        if riot_name:
+            filters["riot_name__iexact"] = riot_name
+
+        print (filters)
+        user_qs = Participant.objects.filter(**filters).select_related("match")
+        if not user_qs.exists():
+            return StreamingHttpResponse("No data found", status=404)
+
+        match_ids = list(user_qs.values_list("match__match_id", flat=True))
+        all_participants = list(
+            Participant.objects.filter(match__match_id__in=match_ids).select_related("match")
+        )
+        by_match = {}
+        for p in all_participants:
+            by_match.setdefault(p.match.match_id, []).append(p)
+
+        # colonnes fixes
+        columns = [
+            "match_id","timestamp_utc","win","queue_type","patch","duration_sec",
+            "side","rank_tier","lane","champion",
+            "k","d","a","cs","gold","vision_score",
+            "ally_champ1","ally_champ2","ally_champ3","ally_champ4",
+            "enemy_champ1","enemy_champ2","enemy_champ3","enemy_champ4","enemy_champ5",
+            "kills_10","deaths_10","assists_10","gold_10","cs_10"
+        ]
+
+        # construit toutes les lignes
+        rows = []
+        for user_p in user_qs:
+            rows.append(_compose_row(user_p, by_match[user_p.match.match_id]))
+
+        # generator qui yield les lignes
+        def row_iter():
+            yield columns
+            for r in rows:
+                yield [r.get(c, "") for c in columns]
+
+        class Echo:
+            def write(self, value): return value
+
+        writer = csv.writer(Echo())
+        response = StreamingHttpResponse((writer.writerow(r) for r in row_iter()),
+                                         content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="matches.csv"'
+        return response
