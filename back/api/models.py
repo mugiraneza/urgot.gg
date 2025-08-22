@@ -13,7 +13,7 @@ class Match(models.Model):
     map_id = models.IntegerField()
     queue_id = models.IntegerField()
     tournament_code = models.CharField(max_length=100, blank=True, null=True)
-
+    objet_complet = models.JSONField()
     def save(self, *args, **kwargs):
         if self.match_id:
             self.game_region = self.match_id.split('_', 1)[0]

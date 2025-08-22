@@ -68,7 +68,7 @@ def get_match(mid: str, region: str) -> Dict:
 def get_timeline(mid: str, region: str) -> Dict:
     return _get_json(f"https://{region}.api.riotgames.com/lol/match/v5/matches/{mid}/timeline")
 
-def insert_match(info: Dict, mid: str):
+def insert_match(info: Dict, mid: str, obj:Dict):
     Match.objects.get_or_create(
         match_id=mid,
         defaults={
@@ -81,6 +81,7 @@ def insert_match(info: Dict, mid: str):
             "map_id": info["mapId"],
             "queue_id": info["queueId"],
             "tournament_code": info.get("tournamentCode"),
+            "objet_complet":obj,
         },
     )
 
@@ -200,7 +201,7 @@ def run_match_import(riot_id: str, region: str):
     for i, mid in enumerate(to_do, 1):
         print(f"[{i}/{len(to_do)}] Import {mid}")
         match_data = get_match(mid, region)
-        insert_match(match_data["info"], mid)
+        insert_match(match_data["info"], mid,match_data)
         insert_teams(mid, match_data["info"]["teams"])
         insert_participants(mid, match_data["info"]["participants"])
 
