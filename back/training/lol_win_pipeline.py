@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-import argparse
+#!/usr/bin/env python3 
+import argparse 
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
@@ -15,12 +15,10 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 REQUIRED_PREGAME = [
-    "win","queue_type","patch","side","rank_tier","lane","champion",
-    "ally_champ1","ally_champ2","ally_champ3","ally_champ4",
-    "enemy_champ1","enemy_champ2","enemy_champ3","enemy_champ4","enemy_champ5"
+    "win", "queue_type", "patch", "side", "rank_tier"
 ]
 
-REQUIRED_POST10 = REQUIRED_PREGAME + ["kills_10","deaths_10","assists_10","gold_10","cs_10"]
+REQUIRED_POST10 = REQUIRED_PREGAME + ["kills_10", "deaths_10", "assists_10", "gold_10", "cs_10"]
 
 def check_columns(df, required):
     missing = [c for c in required if c not in df.columns]
@@ -28,20 +26,33 @@ def check_columns(df, required):
         raise ValueError(f"Colonnes manquantes: {missing}")
 
 def build_features(df, feature_set):
+    # Mise à jour pour s'assurer que toutes les colonnes sont présentes
     if feature_set == "pregame":
         check_columns(df, REQUIRED_PREGAME)
         features = REQUIRED_PREGAME[1:]  # drop target 'win'
     elif feature_set == "post10":
         check_columns(df, REQUIRED_POST10)
-        features = REQUIRED_POST10[1:]
+        features = REQUIRED_POST10[1:]  # drop target 'win'
     else:
         raise ValueError("feature_set doit être 'pregame' ou 'post10'")
 
-    # Split into categorical and numeric automatically
+    # Séparation des colonnes catégorielles et numériques
     cat_cols = [c for c in features if df[c].dtype == "object"]
     num_cols = [c for c in features if c not in cat_cols]
 
+    # Colonnes supplémentaires pour les champions (et les équipes)
+    champion_columns = [champ for champ in df.columns if champ not in REQUIRED_PREGAME]
+    ally_champs = [champ for champ in champion_columns if champ.startswith('ally_')]
+    enemy_champs = [champ for champ in champion_columns if champ.startswith('enemy_')]
+
+    # Créer des nouvelles colonnes indiquant si un champion est dans le côté BLUE ou RED
+    blue_champs = [col for col in ally_champs if df.loc[df['side'] == 'BLUE', col].any()]
+    red_champs = [col for col in enemy_champs if df.loc[df['side'] == 'RED', col].any()]
+
+    features.extend(blue_champs + red_champs)  # Ajouter les champions par équipe
+
     return features, cat_cols, num_cols
+
 
 def build_pipeline(cat_cols, num_cols):
     # Rendre OneHotEncoder dense quelle que soit la version de sklearn
@@ -53,17 +64,17 @@ def build_pipeline(cat_cols, num_cols):
             # scikit-learn < 1.2
             return OneHotEncoder(handle_unknown="ignore", sparse=False)
 
-    cat_pipe = Pipeline([
+    cat_pipe = Pipeline([  # Pipeline pour les colonnes catégorielles
         ("imputer", SimpleImputer(strategy="most_frequent")),
         ("ohe", make_ohe_dense())
     ])
 
-    num_pipe = Pipeline([
+    num_pipe = Pipeline([  # Pipeline pour les colonnes numériques
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
     ])
 
-    preproc = ColumnTransformer([
+    preproc = ColumnTransformer([  # Transformation des colonnes
         ("cat", cat_pipe, cat_cols),
         ("num", num_pipe, num_cols)
     ])
@@ -94,7 +105,7 @@ def evaluate(pipe, X_train, y_train, X_test, y_test):
 
     # Fit on full train then evaluate on test
     pipe.fit(X_train, y_train)
-    proba = pipe.predict_proba(X_test)[:,1]
+    proba = pipe.predict_proba(X_test)[:, 1]
     pred = (proba >= 0.5).astype(int)
 
     acc = accuracy_score(y_test, pred)
@@ -121,7 +132,7 @@ def permutation_importances(pipe, X_test, y_test, feature_names, top_k=25):
 def main():
     parser = argparse.ArgumentParser(description="LoL Win Predictor")
     parser.add_argument("--data", type=str, required=True, help="Chemin vers matches.csv")
-    parser.add_argument("--feature_set", type=str, default="pregame", choices=["pregame","post10"], help="Jeu de features à utiliser")
+    parser.add_argument("--feature_set", type=str, default="pregame", choices=["pregame", "post10"], help="Jeu de features à utiliser")
     parser.add_argument("--test_size", type=float, default=0.2, help="Part de test")
     parser.add_argument("--out", type=str, default="win_model.pkl", help="Fichier de sortie du pipeline entraîné")
     args = parser.parse_args()
