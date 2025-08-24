@@ -79,6 +79,10 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+#region ai model
+ML_MODEL_PATH = BASE_DIR / "ml" / "model.pkl"
+#end region ai model
+
 LANGUAGE_CODE = 'fr-fr'
 TIME_ZONE = 'UTC'
 USE_I18N = True

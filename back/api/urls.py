@@ -31,4 +31,5 @@ urlpatterns = [
     path("stats/avg-cs-per-min-last10/", views.AverageCsPerMinByChampionView.as_view(), name="avg-cs-per-min-last10"),
     path("graph/cs-per-minute-evolution-last10/", views.CSPerMinuteLast10GamesGraphView.as_view(), name="graph/cs-per-minute-evolution-last10"),
     path("export/export-matches-csv/", views.ExportMatchesCSVView.as_view(), name="export/export-matches-csv"),
+    path("predict/win/", views.PredictView.as_view(), name="predict/win"),
 ]

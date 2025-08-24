@@ -54,4 +54,12 @@ class DeathSerializer(serializers.ModelSerializer):
         model = Death
         fields = '__all__'
 
+class PredictRequestSerializer(serializers.Serializer):
+    features = serializers.ListField(
+        child=serializers.FloatField(), allow_empty=False
+    )
+
+class PredictResponseSerializer(serializers.Serializer):
+    prediction = serializers.FloatField()  # ou CharField si c’est une classe
+    proba = serializers.FloatField(required=False)
 

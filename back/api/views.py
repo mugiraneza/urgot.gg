@@ -10,6 +10,8 @@ from .serializers import (
     BanSerializer,
     ObjectiveSerializer,
     DeathSerializer,
+    PredictRequestSerializer,
+    PredictResponseSerializer,
 )
 import threading
 from threading import Thread
@@ -26,6 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from io import BytesIO
 from django.http import HttpResponse, StreamingHttpResponse
+from .ml_service import get_model
 import csv
 matplotlib.use('Agg')
 
@@ -1407,7 +1410,6 @@ class TriggerChampionItemImportViewSet(views.APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 def _compose_row(user_p, all_participants):
     """Construit une ligne CSV pour le participant utilisateur."""
     match = user_p.match
@@ -1474,7 +1476,6 @@ class ExportMatchesCSVView(views.APIView):
         if riot_name:
             filters["riot_name__iexact"] = riot_name
 
-        print (filters)
         user_qs = Participant.objects.filter(**filters).select_related("match")
         if not user_qs.exists():
             return StreamingHttpResponse("No data found", status=404)
@@ -1516,3 +1517,52 @@ class ExportMatchesCSVView(views.APIView):
                                          content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="matches.csv"'
         return response
+    
+class PredictView(views.APIView):
+    @swagger_auto_schema(
+        operation_description="Prédiction à partir d'un vecteur de features",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["features"],
+            properties={
+                "features": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(type=openapi.TYPE_NUMBER),
+                    description="Vecteur: [x1, x2, ...]"
+                )
+            },
+            example={"features": [1.2, 3.4, 5.6]}
+        ),
+        responses={
+            200: openapi.Response(
+                description="OK",
+                schema=PredictResponseSerializer,
+                examples={
+                    "application/json": {"prediction": 0.73, "proba": 0.88}
+                },
+            ),
+            400: "Requête invalide",
+        }
+    )
+
+    def post(self, request):
+        ser = PredictRequestSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        X = np.array(ser.validated_data["features"]).reshape(1, -1)
+        print (X)
+        model = get_model()
+        try:
+            y = model.predict(X)
+            data = {"prediction": float(y[0])}
+            if hasattr(model, "predict_proba"):
+                data["proba"] = float(model.predict_proba(X).max(axis=1)[0])
+
+            out = PredictResponseSerializer(data=data)
+            out.is_valid(raise_exception=True)
+            return Response(out.data)
+
+        except Exception as e:
+            return Response({"detail": f"Inference error: {e}"},
+                            status=status.HTTP_400_BAD_REQUEST)
