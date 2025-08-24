@@ -80,7 +80,7 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 #region ai model
-ML_MODEL_PATH = BASE_DIR / "ml" / "model.pkl"
+ML_MODEL_PATH = BASE_DIR / "ml" / "win_model.pkl"
 #end region ai model
 
 LANGUAGE_CODE = 'fr-fr'

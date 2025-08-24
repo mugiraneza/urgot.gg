@@ -1,3 +1,4 @@
+#py lol_win_pipeline.py --data matches.csv --feature_set pregame
 #!/usr/bin/env python3 
 import argparse 
 import pandas as pd
@@ -130,6 +131,7 @@ def permutation_importances(pipe, X_test, y_test, feature_names, top_k=25):
         print(f"Permutation importance échouée: {e}")
 
 def main():
+    print("#> py lol_win_pipeline.py --data matches.csv --feature_set pregame")
     parser = argparse.ArgumentParser(description="LoL Win Predictor")
     parser.add_argument("--data", type=str, required=True, help="Chemin vers matches.csv")
     parser.add_argument("--feature_set", type=str, default="pregame", choices=["pregame", "post10"], help="Jeu de features à utiliser")
