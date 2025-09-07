@@ -7,3 +7,6 @@ gunicorn
 # psycopg2
 drf-spectacular
 python-dotenv
+drf-yasg==1.21.10
+matplotlib==3.10.6
+joblib==1.5.2
