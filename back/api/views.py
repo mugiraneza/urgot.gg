@@ -14,7 +14,6 @@ from .serializers import (
     PredictResponseSerializer,
 )
 import threading
-from threading import Thread
 from rest_framework import viewsets, views, status
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
@@ -128,15 +127,23 @@ class TriggerMatchImportViewSet(views.APIView):
     )
     def post(self, request, **kwargs):
         try:
-            def import_task():
-                run_match_import(riot_id, region)
-                running_imports.pop(riot_id, None)  
             riot_id = request.data.get("riot_id", "proctologue#urgot")
             region = request.data.get("region", "europe")
-            thread = threading.Thread(target=import_task)
-            thread.start()
+            existing_thread = running_imports.get(riot_id)
+            if existing_thread and existing_thread.is_alive():
+                return Response(
+                    {"message": f"Un import est déjà en cours pour {riot_id}"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            def import_task():
+                try:
+                    run_match_import(riot_id, region)
+                finally:
+                    running_imports.pop(riot_id, None)
+            thread = threading.Thread(target=import_task, daemon=True)
             running_imports[riot_id] = thread
-            Thread(target=run_match_import, args=(riot_id, region)).start()
+            thread.start()
             return Response({"message": f"Import lancé pour {riot_id} ({region})"}, status=202)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -230,9 +237,10 @@ class PositionStatsView(views.APIView):
         if riot_name:
             filters['riot_name__iexact'] = riot_name
 
-        participants = Participant.objects.filter(**filters, match__game_end_ts__gte=int(cutoff_date.timestamp()))
+        cutoff_ts_ms = int(cutoff_date.timestamp() * 1000)
+        participants = Participant.objects.filter(**filters, match__game_end_ts__gte=cutoff_ts_ms)
 
-        if not participants.exists():
+        if not participants:
             return Response({"message": "Aucune donnée trouvée pour ce joueur."}, status=200)
 
         # Compter les positions
@@ -301,7 +309,7 @@ class YearlyWinLossByPositionView(views.APIView):
 
         participants = Participant.objects.filter(**filters).select_related('match')
 
-        if not participants.exists():
+        if not participants:
             return Response({"message": "Aucune donnée trouvée."}, status=200)
 
         results = {}
@@ -590,14 +598,18 @@ class GlobalStatsView(views.APIView):
         else:
             return Response({"error": "Veuillez fournir 'puuid' ou 'riot_name'."}, status=400)
 
-        participants = Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+        participants = list(
+            Participant.objects.filter(**filters)
+            .select_related("match")
+            .order_by("match__game_creation")
+        )
 
-        if not participants.exists():
+        if not participants:
             return Response({"message": "Aucune donnée trouvée."}, status=200)
 
-        total_games = participants.count()
-        first_match_ts = participants.first().match.game_creation // 1000
-        last_match_ts = participants.last().match.game_end_ts // 1000
+        total_games = len(participants)
+        first_match_ts = participants[0].match.game_creation // 1000
+        last_match_ts = participants[-1].match.game_end_ts // 1000
 
         first_match = datetime.utcfromtimestamp(first_match_ts)
         last_match = datetime.utcfromtimestamp(last_match_ts)
@@ -617,13 +629,32 @@ class GlobalStatsView(views.APIView):
             return f"{days}d:{hours:02}h:{minutes:02}m:{seconds:02}s"
 
         # Nombre de personnes rencontrées (hors soi-même)
-        total_players_met = Participant.objects.filter(match__in=[p.match for p in participants]).exclude(puuid=puuid).values("puuid").distinct().count()
+        user_puuid = puuid or participants[0].puuid
+        match_ids = [p.match_id for p in participants]
+        all_match_participants = list(
+            Participant.objects.filter(match_id__in=match_ids).only("match_id", "team_id", "puuid")
+        )
+        by_match = defaultdict(list)
+        for participant in all_match_participants:
+            by_match[participant.match_id].append(participant)
+
+        total_players_met = (
+            Participant.objects.filter(match_id__in=match_ids)
+            .exclude(puuid=user_puuid)
+            .values("puuid")
+            .distinct()
+            .count()
+        )
 
         # Moyenne de nouveaux et anciens joueurs rencontrés
         per_game_coop = defaultdict(set)
         for p in participants:
-            allies = Participant.objects.filter(match=p.match, team_id=p.team_id).exclude(puuid=p.puuid)
-            per_game_coop[p.match.match_id].update(a.puuid for a in allies)
+            allies = [
+                ally.puuid
+                for ally in by_match[p.match_id]
+                if ally.team_id == p.team_id and ally.puuid != p.puuid
+            ]
+            per_game_coop[p.match.match_id].update(allies)
 
         coop_counts = list(per_game_coop.values())
         unique_seen = set()
