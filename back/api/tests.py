@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import Match, Participant
+from .models import Champion, Item, Match, Participant
 from .views import running_imports
 
 
@@ -155,3 +155,99 @@ class GlobalStatsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["people_met"], 2)
+
+
+class FrontApiViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.champion = Champion.objects.create(
+            champion_id="Urgot",
+            key="6",
+            name="Urgot",
+            title="the Dreadnought",
+            image_full="Urgot.png",
+            image_sprite="champion4.png",
+            image_group="champion",
+            image_x=0,
+            image_y=0,
+            image_w=48,
+            image_h=48,
+            lore="lore",
+            blurb="blurb",
+            partype="Mana",
+        )
+        self.item = Item.objects.create(
+            item_id="1001",
+            name="Boots of Speed",
+            description="desc",
+            colloq="boots",
+            plaintext="plain",
+            image_full="1001.png",
+            image_sprite="item0.png",
+            image_group="item",
+            image_x=0,
+            image_y=0,
+            image_w=48,
+            image_h=48,
+        )
+        now_ms = int(timezone.now().timestamp() * 1000)
+        self.match = Match.objects.create(
+            match_id="EUW1_4",
+            game_creation=now_ms,
+            game_end_ts=now_ms,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=420,
+        )
+        Participant.objects.create(
+            match=self.match,
+            participant_id=1,
+            **participant_defaults(
+                puuid="player-1",
+                riot_name="player#euw",
+                team_id=100,
+                champion=self.champion,
+                item0=self.item,
+            ),
+        )
+        Participant.objects.create(
+            match=self.match,
+            participant_id=2,
+            **participant_defaults(puuid="ally-1", riot_name="ally#euw", team_id=100, champion=self.champion),
+        )
+        Participant.objects.create(
+            match=self.match,
+            participant_id=3,
+            **participant_defaults(puuid="enemy-1", riot_name="enemy#euw", team_id=200, champion=self.champion),
+        )
+
+    def test_front_dashboard_reads_local_db(self):
+        response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "local_db")
+        self.assertIn("overview", payload)
+        self.assertIn("champions", payload)
+        self.assertIn("modes", payload)
+        self.assertIn("cs_evolution", payload)
+
+    def test_front_matches_reads_local_db(self):
+        response = self.client.get(reverse("front-matches"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "local_db")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["match_id"], "EUW1_4")
+        self.assertEqual(
+            payload["results"][0]["champion_image_url"],
+            "http://testserver/api/assets/champions/champions/Urgot.png",
+        )
+        self.assertEqual(
+            payload["results"][0]["items"][0]["image_url"],
+            "http://testserver/api/assets/items/items/1001.png",
+        )

@@ -44,11 +44,11 @@ class RiotDataImporter:
     def setup_image_directories(self):
         """Crée les dossiers pour stocker les images"""
         directories = [
-            'riot_images/champions',
-            'riot_images/champions/skins',
-            'riot_images/spells',
-            'riot_images/passives',
-            'riot_images/items',
+            'static/riot_images/champions',
+            'static/riot_images/champions/skins',
+            'static/riot_images/spells',
+            'static/riot_images/passives',
+            'static/riot_images/items',
         ]
         
         for directory in directories:
@@ -105,7 +105,7 @@ class RiotDataImporter:
             return None
             
         image_url = f"{self.champion_img_url}/{image_filename}"
-        local_path = f"riot_images/champions/{image_filename}"
+        local_path = f"static/riot_images/champions/{image_filename}"
         return self.download_image(image_url, local_path)
     
     def download_spell_image(self, image_filename):
@@ -114,7 +114,7 @@ class RiotDataImporter:
             return None
             
         image_url = f"{self.spell_img_url}/{image_filename}"
-        local_path = f"riot_images/spells/{image_filename}"
+        local_path = f"static/riot_images/spells/{image_filename}"
         return self.download_image(image_url, local_path)
     
     def download_passive_image(self, image_filename):
@@ -123,7 +123,7 @@ class RiotDataImporter:
             return None
             
         image_url = f"{self.passive_img_url}/{image_filename}"
-        local_path = f"riot_images/passives/{image_filename}"
+        local_path = f"static/riot_images/passives/{image_filename}"
         return self.download_image(image_url, local_path)
     
     def download_item_image(self, image_filename):
@@ -132,7 +132,7 @@ class RiotDataImporter:
             return None
             
         image_url = f"{self.item_img_url}/{image_filename}"
-        local_path = f"riot_images/items/{image_filename}"
+        local_path = f"static/riot_images/items/{image_filename}"
         return self.download_image(image_url, local_path)
     
     def download_skin_splash(self, champion_name, skin_num):
@@ -142,7 +142,7 @@ class RiotDataImporter:
             
         image_filename = f"{champion_name}_{skin_num}.jpg"
         image_url = f"{self.skin_img_url}/{image_filename}"
-        local_path = f"riot_images/champions/skins/splash_{image_filename}"
+        local_path = f"static/riot_images/champions/skins/splash_{image_filename}"
         return self.download_image(image_url, local_path)
     
     def download_skin_loading(self, champion_name, skin_num):
@@ -152,7 +152,7 @@ class RiotDataImporter:
             
         image_filename = f"{champion_name}_{skin_num}.jpg"
         image_url = f"{self.skin_loading_url}/{image_filename}"
-        local_path = f"riot_images/champions/skins/loading_{image_filename}"
+        local_path = f"static/riot_images/champions/skins/loading_{image_filename}"
         return self.download_image(image_url, local_path)
 
         

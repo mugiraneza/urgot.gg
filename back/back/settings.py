@@ -86,4 +86,5 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = 'static/'
+RIOT_IMAGES_ROOT = BASE_DIR / "static/riot_images"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

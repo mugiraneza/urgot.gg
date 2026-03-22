@@ -26,7 +26,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from io import BytesIO
-from django.http import HttpResponse, StreamingHttpResponse
+from pathlib import Path
+from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
+from django.conf import settings
 from .ml_service import get_model
 import csv
 matplotlib.use('Agg')
@@ -61,6 +63,327 @@ QUEUE_NAMES = {
 }
 
 #EndOfRegion Variable Global
+
+
+def _get_player_filters(request):
+    puuid = request.GET.get("puuid")
+    riot_name = request.GET.get("riot_name")
+
+    if not puuid and not riot_name:
+        return None, Response({"error": "Veuillez fournir 'puuid' ou 'riot_name'."}, status=400)
+
+    filters = {}
+    if puuid:
+        filters["puuid"] = puuid
+    if riot_name:
+        filters["riot_name__iexact"] = riot_name
+    return filters, None
+
+
+def _build_asset_url(request, asset_type, resource_name):
+    if not resource_name:
+        return None
+    filename = f"{resource_name}.png"
+    return request.build_absolute_uri(f"/api/assets/{asset_type}/{asset_type}/{filename}")
+
+
+def _serialize_item_slot(request, item):
+    if not item:
+        return {"id": None, "name": None, "image_url": None}
+    return {
+        "id": item.item_id,
+        "name": item.name,
+        "image_url": _build_asset_url(request, "items", item.item_id),
+    }
+
+
+def _build_match_details(request, filters):
+    user_participants = (
+        Participant.objects.filter(**filters)
+        .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
+        .order_by("-match__game_creation")
+    )
+
+    if not user_participants.exists():
+        return []
+
+    match_ids = [p.match_id for p in user_participants]
+    all_participants = Participant.objects.filter(match_id__in=match_ids)
+
+    match_participants_map = defaultdict(list)
+    team_kills_map = defaultdict(lambda: defaultdict(int))
+
+    for participant in all_participants:
+        match_participants_map[participant.match_id].append(participant)
+        team_kills_map[participant.match_id][participant.team_id] += participant.kills
+
+    results = []
+
+    for participant in user_participants:
+        match = participant.match
+        match_id = match.match_id
+        team_kills = team_kills_map[match_id][participant.team_id]
+        participants_list = match_participants_map[match_id]
+
+        kda_ratio = (participant.kills + participant.assists) / max(1, participant.deaths)
+        kill_participation = (participant.kills + participant.assists) / max(1, team_kills)
+
+        results.append({
+            "match_id": match_id,
+            "champion": participant.champion_name,
+            "champion_image_url": _build_asset_url(request, "champions", participant.champion_name),
+            "position": participant.team_position,
+            "win": participant.win,
+            "team_id": participant.team_id,
+            "queue_name": QUEUE_NAMES.get(match.queue_id, f"Unknown ({match.queue_id})"),
+            "game_duration": match.game_duration,
+            "summoner_spells": [participant.summoner1_id, participant.summoner2_id],
+            "kills": participant.kills,
+            "deaths": participant.deaths,
+            "assists": participant.assists,
+            "kda_ratio": round(kda_ratio, 2),
+            "kill_participation": round(kill_participation * 100, 1),
+            "items": [
+                _serialize_item_slot(request, participant.item0),
+                _serialize_item_slot(request, participant.item1),
+                _serialize_item_slot(request, participant.item2),
+                _serialize_item_slot(request, participant.item3),
+                _serialize_item_slot(request, participant.item4),
+                _serialize_item_slot(request, participant.item5),
+                _serialize_item_slot(request, participant.item6),
+            ],
+            "wards_placed": participant.wards_placed,
+            "wards_destroyed": max(0, participant.vision_score - participant.wards_placed),
+            "vision_score": participant.vision_score,
+            "start_time": datetime.fromtimestamp(match.game_creation / 1000).isoformat(),
+            "end_time": datetime.fromtimestamp(match.game_end_ts / 1000).isoformat(),
+            "participant_id": participant.participant_id,
+            "participants": [
+                {
+                    "riot_name": teammate.riot_name,
+                    "champion": teammate.champion_name,
+                    "champion_image_url": _build_asset_url(request, "champions", teammate.champion_name),
+                    "team_id": teammate.team_id,
+                    "kills": teammate.kills,
+                    "deaths": teammate.deaths,
+                    "assists": teammate.assists,
+                }
+                for teammate in participants_list
+            ],
+        })
+
+    return results
+
+
+def _build_champion_pool(request, filters):
+    participants = Participant.objects.filter(
+        **filters, match__queue_id__in=[400, 420, 430, 440]
+    ).select_related("match", "champion")
+
+    if not participants.exists():
+        return []
+
+    match_ids = [p.match_id for p in participants]
+    all_participants = Participant.objects.filter(match_id__in=match_ids)
+    team_kills_map = defaultdict(lambda: defaultdict(int))
+    for participant in all_participants:
+        team_kills_map[participant.match_id][participant.team_id] += participant.kills
+
+    stats = {}
+    for participant in participants:
+        role = (participant.team_position or "").upper()
+        if role in ["", "UNKNOWN"]:
+            continue
+
+        champion_stats = stats.setdefault(
+            participant.champion_name,
+            {
+                "games": 0,
+                "wins": 0,
+                "total_kills": 0,
+                "total_deaths": 0,
+                "total_assists": 0,
+                "total_damage": 0,
+                "total_minions": 0,
+                "total_time": 0,
+                "total_kp_ratio": 0.0,
+            },
+        )
+        champion_stats["games"] += 1
+        champion_stats["wins"] += int(participant.win)
+        champion_stats["total_kills"] += participant.kills
+        champion_stats["total_deaths"] += participant.deaths
+        champion_stats["total_assists"] += participant.assists
+        champion_stats["total_damage"] += participant.total_damage_dealt_champs
+        champion_stats["total_minions"] += participant.total_minions_killed + participant.neutral_minions_killed
+        champion_stats["total_time"] += participant.time_played
+
+        team_kills = team_kills_map[participant.match.match_id][participant.team_id]
+        if team_kills > 0:
+            champion_stats["total_kp_ratio"] += (participant.kills + participant.assists) / team_kills
+
+    result = []
+    for champion, data in stats.items():
+        games = data["games"]
+        time_minutes = data["total_time"] / 60 if data["total_time"] > 0 else 1
+        result.append(
+            {
+                "champion": champion,
+                "champion_image_url": _build_asset_url(request, "champions", champion),
+                "games": games,
+                "win_rate": round((data["wins"] / games) * 100, 1),
+                "kda": round((data["total_kills"] + data["total_assists"]) / max(1, data["total_deaths"]), 2),
+                "cs_per_min": round(data["total_minions"] / time_minutes, 2),
+                "dpm": round(data["total_damage"] / time_minutes, 2),
+                "kp": round((data["total_kp_ratio"] / games) * 100, 1),
+            }
+        )
+
+    return sorted(result, key=lambda item: item["games"], reverse=True)
+
+
+def _build_global_overview(filters):
+    participants = list(
+        Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+    )
+    if not participants:
+        return None
+
+    total_games = len(participants)
+    first_match = datetime.utcfromtimestamp(participants[0].match.game_creation // 1000)
+    last_match = datetime.utcfromtimestamp(participants[-1].match.game_end_ts // 1000)
+    total_time_played_sec = sum(participant.time_played for participant in participants)
+    total_days_range = max(1, (last_match - first_match).days + 1)
+
+    def format_duration(seconds):
+        duration = timedelta(seconds=seconds)
+        days = duration.days
+        hours, remainder = divmod(duration.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{days}d:{hours:02}h"
+
+    user_puuid = participants[0].puuid
+    match_ids = [participant.match_id for participant in participants]
+    all_match_participants = list(
+        Participant.objects.filter(match_id__in=match_ids).only("match_id", "team_id", "puuid")
+    )
+    by_match = defaultdict(list)
+    for participant in all_match_participants:
+        by_match[participant.match_id].append(participant)
+
+    total_players_met = (
+        Participant.objects.filter(match_id__in=match_ids)
+        .exclude(puuid=user_puuid)
+        .values("puuid")
+        .distinct()
+        .count()
+    )
+
+    per_game_coop = defaultdict(set)
+    for participant in participants:
+        allies = [
+            ally.puuid
+            for ally in by_match[participant.match_id]
+            if ally.team_id == participant.team_id and ally.puuid != participant.puuid
+        ]
+        per_game_coop[participant.match.match_id].update(allies)
+
+    unique_seen = set()
+    new_per_game = 0
+    old_per_game = 0
+    for puuids in per_game_coop.values():
+        new_per_game += len([value for value in puuids if value not in unique_seen])
+        old_per_game += len([value for value in puuids if value in unique_seen])
+        unique_seen.update(puuids)
+
+    return {
+        "games_analyzed": total_games,
+        "oldest_match": first_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+        "most_recent_match": last_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+        "total_time_played": format_duration(total_time_played_sec),
+        "avg_time_per_day": str(timedelta(seconds=int(total_time_played_sec / total_days_range))),
+        "avg_games_per_day": round(total_games / total_days_range, 2),
+        "percent_time_played": f"{round(((total_time_played_sec / total_days_range) / (24 * 3600)) * 100, 2)}%",
+        "people_met": total_players_met,
+        "avg_new_people_per_game": round(new_per_game / total_games, 2),
+        "avg_old_friends_per_game": round(old_per_game / total_games, 2),
+    }
+
+
+def _build_mode_stats(filters):
+    participants = Participant.objects.filter(**filters).select_related("match")
+    if not participants.exists():
+        return []
+
+    mode_stats = defaultdict(
+        lambda: {
+            "queue": None,
+            "total_games": 0,
+            "wins": 0,
+            "losses": 0,
+            "surrenders": 0,
+            "total_time_played": 0,
+        }
+    )
+
+    for participant in participants:
+        qid = participant.match.queue_id
+        data = mode_stats[qid]
+        data["queue"] = qid
+        data["total_games"] += 1
+        data["total_time_played"] += participant.time_played
+        if participant.win:
+            data["wins"] += 1
+        else:
+            data["losses"] += 1
+            if participant.time_played < 600:
+                data["surrenders"] += 1
+
+    total_games_all_modes = sum(entry["total_games"] for entry in mode_stats.values())
+    result = []
+    for qid, data in sorted(mode_stats.items()):
+        total = data["total_games"]
+        avg_duration_sec = data["total_time_played"] / total if total else 0
+        result.append(
+            {
+                "queue": qid,
+                "queue_name": QUEUE_NAMES.get(qid, f"Unknown ({qid})"),
+                "total_games": total,
+                "percent_share": round((total / total_games_all_modes) * 100, 2) if total_games_all_modes else 0,
+                "wins": data["wins"],
+                "losses": data["losses"],
+                "surrenders": data["surrenders"],
+                "winrate": round((data["wins"] / total) * 100, 2) if total else 0,
+                "avg_game_duration": str(timedelta(seconds=int(avg_duration_sec))),
+                "total_time_spent": str(timedelta(seconds=data["total_time_played"])),
+            }
+        )
+    return result
+
+
+def _build_cs_evolution(filters):
+    participants = (
+        Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+    )
+    if not participants.exists():
+        return []
+
+    result = []
+    for participant in participants:
+        cs_total = participant.total_minions_killed + participant.neutral_minions_killed
+        time_minutes = participant.time_played / 60 if participant.time_played else 1
+        result.append(
+            {
+                "match_id": participant.match.match_id,
+                "date": datetime.fromtimestamp(participant.match.game_creation / 1000).strftime("%Y-%m-%d %H:%M"),
+                "champion": participant.champion_name,
+                "cs": cs_total,
+                "duration_min": round(time_minutes, 2),
+                "cs_per_min": round(cs_total / time_minutes, 2),
+                "position": participant.team_position,
+            }
+        )
+    return result
 
 class MatchViewSet(viewsets.ModelViewSet):
     """
@@ -103,6 +426,91 @@ class DeathViewSet(viewsets.ModelViewSet):
     """
     queryset = Death.objects.all()
     serializer_class = DeathSerializer
+
+
+class RiotAssetView(views.APIView):
+    """
+    Expose local Riot images through internal API routes.
+    """
+
+    def get(self, request, asset_type, filename):
+        allowed_types = {"champions", "items", "spells", "passives"}
+        if asset_type not in allowed_types:
+            raise Http404("Unknown asset type")
+
+        relative_path = Path(filename)
+        if relative_path.parts and relative_path.parts[0] != asset_type:
+            raise Http404("Invalid asset path")
+
+        file_path = (settings.RIOT_IMAGES_ROOT / relative_path).resolve()
+        try:
+            file_path.relative_to(settings.RIOT_IMAGES_ROOT.resolve())
+        except ValueError as error:
+            raise Http404("Invalid asset path") from error
+
+        if not file_path.exists() or not file_path.is_file():
+            raise Http404("Asset not found")
+
+        return FileResponse(file_path.open("rb"))
+
+
+class FrontDashboardView(views.APIView):
+    """
+    Endpoint frontend local-only: agrège les statistiques depuis la base locale.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Retourne le dashboard frontend depuis la base locale uniquement.",
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+        ],
+    )
+    def get(self, request):
+        filters, error_response = _get_player_filters(request)
+        if error_response:
+            return error_response
+
+        overview = _build_global_overview(filters)
+        if overview is None:
+            return Response({"message": "Aucune donnée trouvée.", "source": "local_db"}, status=200)
+
+        return Response(
+            {
+                "source": "local_db",
+                "overview": overview,
+                "modes": _build_mode_stats(filters),
+                "champions": _build_champion_pool(request, filters),
+                "cs_evolution": _build_cs_evolution(filters),
+            },
+            status=200,
+        )
+
+
+class FrontMatchesView(views.APIView):
+    """
+    Endpoint frontend local-only: liste paginée des matchs depuis la base locale.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Retourne la liste des matchs frontend depuis la base locale uniquement.",
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+            openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Numéro de page"),
+        ],
+    )
+    def get(self, request):
+        filters, error_response = _get_player_filters(request)
+        if error_response:
+            return error_response
+
+        results = _build_match_details(request, filters)
+        paginator = PageNumberPagination()
+        paginated_results = paginator.paginate_queryset(results, request)
+        response = paginator.get_paginated_response(paginated_results)
+        response.data["source"] = "local_db"
+        return response
 
 #bloc des statistiques
 class TriggerMatchImportViewSet(views.APIView):
