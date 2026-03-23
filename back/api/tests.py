@@ -211,17 +211,36 @@ class FrontApiViewTests(TestCase):
                 team_id=100,
                 champion=self.champion,
                 item0=self.item,
+                rank_tier="GOLD",
+                rank_division="II",
+                rank_lp=47,
             ),
         )
         Participant.objects.create(
             match=self.match,
             participant_id=2,
-            **participant_defaults(puuid="ally-1", riot_name="ally#euw", team_id=100, champion=self.champion),
+            **participant_defaults(
+                puuid="ally-1",
+                riot_name="ally#euw",
+                team_id=100,
+                champion=self.champion,
+                rank_tier="SILVER",
+                rank_division="I",
+                rank_lp=12,
+            ),
         )
         Participant.objects.create(
             match=self.match,
             participant_id=3,
-            **participant_defaults(puuid="enemy-1", riot_name="enemy#euw", team_id=200, champion=self.champion),
+            **participant_defaults(
+                puuid="enemy-1",
+                riot_name="enemy#euw",
+                team_id=200,
+                champion=self.champion,
+                rank_tier="PLATINUM",
+                rank_division="IV",
+                rank_lp=88,
+            ),
         )
 
     def test_front_dashboard_reads_local_db(self):
@@ -251,3 +270,7 @@ class FrontApiViewTests(TestCase):
             payload["results"][0]["items"][0]["image_url"],
             "http://testserver/api/assets/items/items/1001.png",
         )
+        self.assertEqual(payload["results"][0]["rank_label"], "GOLD II - 47 LP")
+        participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in payload["results"][0]["participants"]}
+        self.assertEqual(participant_ranks["player#euw"], "GOLD II - 47 LP")
+        self.assertEqual(participant_ranks["ally#euw"], "SILVER I - 12 LP")

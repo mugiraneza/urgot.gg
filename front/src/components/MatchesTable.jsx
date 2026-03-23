@@ -59,7 +59,10 @@ function TeamRoster({ title, players }) {
               {player.champion_image_url ? (
                 <img className="champion-icon" src={player.champion_image_url} alt={player.champion} />
               ) : null}
-              <strong>{player.riot_name}</strong>
+              <div className="expanded-player-heading">
+                <strong>{player.riot_name}</strong>
+                {player.rank_label ? <span className="rank-badge">{player.rank_label}</span> : null}
+              </div>
             </div>
             <span>{player.champion}</span>
             <small>
@@ -119,7 +122,10 @@ export function MatchesTable({
                         {match.champion_image_url ? (
                           <img className="champion-icon champion-icon-lg" src={match.champion_image_url} alt={match.champion} />
                         ) : null}
-                        <strong>{match.champion}</strong>
+                        <div className="match-champion-heading">
+                          <strong>{match.champion}</strong>
+                          {match.rank_label ? <span className="rank-badge">{match.rank_label}</span> : null}
+                        </div>
                       </div>
                       <span>{match.position || "UNKNOWN"}</span>
                     </div>

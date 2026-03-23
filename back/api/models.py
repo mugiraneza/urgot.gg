@@ -66,6 +66,10 @@ class Participant(models.Model):
     first_tower_kill = models.BooleanField()
     team_position = models.CharField(max_length=50)
     time_played = models.IntegerField()
+    rank_queue = models.CharField(max_length=50, blank=True, default="")
+    rank_tier = models.CharField(max_length=20, blank=True, default="")
+    rank_division = models.CharField(max_length=10, blank=True, default="")
+    rank_lp = models.IntegerField(null=True, blank=True)
 
     class Meta:
         unique_together = ('match', 'participant_id')

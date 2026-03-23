@@ -3,6 +3,8 @@ function statValue(value) {
 }
 
 export function StatsOverview({ stats, query, activeMatch }) {
+  const eloLabel = stats?.player_elo || activeMatch?.rank_label || "Elo inconnu";
+
   return (
     <section className="profile-card">
       <div className="profile-header">
@@ -10,7 +12,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
         <div>
           <p className="eyebrow">Profil</p>
           <h3>{query.value || "Joueur local"}</h3>
-          <p className="muted"> palceholder</p> 
+          <p className="muted">{eloLabel}</p>
         </div>
       </div>
 

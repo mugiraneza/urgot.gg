@@ -8,6 +8,8 @@ RIOT_API_KEY = os.getenv("RIOT_KEY")
 MAX_MATCHES = int(1000)
 DELAY_SEC = float(1.3)
 HEADERS = {"X-Riot-Token": RIOT_API_KEY}
+RANKED_QUEUE_PRIORITY = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR"]
+RANK_CACHE: Dict[str, Dict] = {}
 
 def _get_json(url: str) -> Dict:
     while True:
@@ -68,6 +70,32 @@ def get_match(mid: str, region: str) -> Dict:
 def get_timeline(mid: str, region: str) -> Dict:
     return _get_json(f"https://{region}.api.riotgames.com/lol/match/v5/matches/{mid}/timeline")
 
+
+def get_platform_region(match_id: str) -> str:
+    return match_id.split("_", 1)[0].lower()
+
+
+def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
+    cache_key = f"{platform_region}:{puuid}"
+    if cache_key in RANK_CACHE:
+        return RANK_CACHE[cache_key]
+
+    entries = _get_json(
+        f"https://{platform_region}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
+    )
+    if not isinstance(entries, list):
+        RANK_CACHE[cache_key] = {}
+        return {}
+
+    for queue_type in RANKED_QUEUE_PRIORITY:
+        for entry in entries:
+            if entry.get("queueType") == queue_type:
+                RANK_CACHE[cache_key] = entry
+                return entry
+
+    RANK_CACHE[cache_key] = entries[0] if entries else {}
+    return RANK_CACHE[cache_key]
+
 def insert_match(info: Dict, mid: str, obj:Dict):
     Match.objects.get_or_create(
         match_id=mid,
@@ -120,12 +148,15 @@ def insert_teams(mid: str, teams: List[Dict]):
 
 def insert_participants(mid: str, participants: List[Dict]):
     match = Match.objects.get(pk=mid)
+    platform_region = get_platform_region(mid)
     for p in participants:
+        puuid = p["puuid"]
+        rank_entry = get_rank_entry_for_puuid(puuid, platform_region)
         Participant.objects.get_or_create(
             match=match,
             participant_id=p["participantId"],
             defaults={
-                "puuid": p["puuid"],
+                "puuid": puuid,
                 "riot_name": f"{p['riotIdGameName']}#{p['riotIdTagline']}",
                 "team_id": p["teamId"],
                 "champion_id": get_champion_id(p["championId"]),
@@ -165,6 +196,10 @@ def insert_participants(mid: str, participants: List[Dict]):
                 "first_tower_kill": bool(p["firstTowerKill"]),
                 "team_position": p["teamPosition"],
                 "time_played": p["timePlayed"],
+                "rank_queue": rank_entry.get("queueType", ""),
+                "rank_tier": rank_entry.get("tier", ""),
+                "rank_division": rank_entry.get("rank", ""),
+                "rank_lp": rank_entry.get("leaguePoints"),
             },
         )
 

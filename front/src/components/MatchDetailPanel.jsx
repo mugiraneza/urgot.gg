@@ -24,6 +24,7 @@ export function MatchDetailPanel({ match }) {
         <div>
           <p className="eyebrow">Partie</p>
           <h2>{match.champion}</h2>
+          {match.rank_label ? <p className="muted rank-line">{match.rank_label}</p> : null}
         </div>
         <span className="pill">{match.position || "UNKNOWN"}</span>
       </div>
@@ -57,6 +58,7 @@ export function MatchDetailPanel({ match }) {
               <li key={`${match.match_id}-${player.riot_name}`}>
                 <span>{player.champion}</span>
                 <strong>{player.riot_name}</strong>
+                {player.rank_label ? <small>{player.rank_label}</small> : null}
                 <small>
                   {player.kills}/{player.deaths}/{player.assists}
                 </small>
@@ -72,6 +74,7 @@ export function MatchDetailPanel({ match }) {
               <li key={`${match.match_id}-${player.riot_name}`}>
                 <span>{player.champion}</span>
                 <strong>{player.riot_name}</strong>
+                {player.rank_label ? <small>{player.rank_label}</small> : null}
                 <small>
                   {player.kills}/{player.deaths}/{player.assists}
                 </small>

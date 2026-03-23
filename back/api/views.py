@@ -97,6 +97,20 @@ def _serialize_item_slot(request, item):
     }
 
 
+def _format_rank_label(participant):
+    if not participant.rank_tier:
+        return None
+
+    parts = [participant.rank_tier]
+    if participant.rank_division:
+        parts.append(participant.rank_division)
+
+    label = " ".join(parts)
+    if participant.rank_lp is not None:
+        label = f"{label} - {participant.rank_lp} LP"
+    return label
+
+
 def _build_match_details(request, filters):
     user_participants = (
         Participant.objects.filter(**filters)
@@ -133,6 +147,11 @@ def _build_match_details(request, filters):
             "champion": participant.champion_name,
             "champion_image_url": _build_asset_url(request, "champions", participant.champion_name),
             "position": participant.team_position,
+            "rank_queue": participant.rank_queue,
+            "rank_tier": participant.rank_tier,
+            "rank_division": participant.rank_division,
+            "rank_lp": participant.rank_lp,
+            "rank_label": _format_rank_label(participant),
             "win": participant.win,
             "team_id": participant.team_id,
             "queue_name": QUEUE_NAMES.get(match.queue_id, f"Unknown ({match.queue_id})"),
@@ -167,6 +186,11 @@ def _build_match_details(request, filters):
                     "kills": teammate.kills,
                     "deaths": teammate.deaths,
                     "assists": teammate.assists,
+                    "rank_queue": teammate.rank_queue,
+                    "rank_tier": teammate.rank_tier,
+                    "rank_division": teammate.rank_division,
+                    "rank_lp": teammate.rank_lp,
+                    "rank_label": _format_rank_label(teammate),
                 }
                 for teammate in participants_list
             ],
@@ -250,6 +274,11 @@ def _build_global_overview(filters):
         return None
 
     total_games = len(participants)
+    total_wins = sum(1 for participant in participants if participant.win)
+    latest_ranked_participant = next(
+        (participant for participant in reversed(participants) if participant.rank_tier),
+        None,
+    )
     first_match = datetime.utcfromtimestamp(participants[0].match.game_creation // 1000)
     last_match = datetime.utcfromtimestamp(participants[-1].match.game_end_ts // 1000)
     total_time_played_sec = sum(participant.time_played for participant in participants)
@@ -298,6 +327,8 @@ def _build_global_overview(filters):
 
     return {
         "games_analyzed": total_games,
+        "winrate": round((total_wins / total_games) * 100, 1) if total_games else 0,
+        "player_elo": _format_rank_label(latest_ranked_participant) if latest_ranked_participant else None,
         "oldest_match": first_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "most_recent_match": last_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "total_time_played": format_duration(total_time_played_sec),
@@ -1869,7 +1900,7 @@ def _compose_row(user_p, all_participants):
         "patch": match.game_version,
         "duration_sec": match.game_duration or user_p.time_played,
         "side": SIDE_MAP.get(user_p.team_id, "UNKNOWN"),
-        "rank_tier": "",
+        "rank_tier": user_p.rank_tier or "",
         "lane": (user_p.team_position or user_p.individual_position or "UNKNOWN").upper(),
         "champion": user_p.champion_name,
         "k": user_p.kills, "d": user_p.deaths, "a": user_p.assists,

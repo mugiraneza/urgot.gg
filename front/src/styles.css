@@ -230,7 +230,7 @@ input {
 
 .opgg-layout {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 400px minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
@@ -288,6 +288,67 @@ input {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.winrate-card {
+  --winrate: 0%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 88px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #58313b 0%, #442630 100%);
+  border: 1px solid rgba(255, 170, 120, 0.08);
+}
+
+.winrate-card-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+winrate-card-copy span {
+  color: rgba(255, 215, 186, 0.7);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.winrate-card-copy strong {
+  margin-top: 2px;
+  color: #ffa15b;
+  font-size: 2rem;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.winrate-card-copy small {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.winrate-card-ring {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(#ffa15b var(--winrate), rgba(255, 255, 255, 0.16) 0);
+  transform: rotate(-35deg);
+}
+
+.winrate-card-ring-core {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: #31262b;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
 .profile-highlight span,
 .mini-stat span,
 .focus-card span {
@@ -318,6 +379,13 @@ input {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.match-champion-heading,
+.expanded-player-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .focus-kda {
@@ -357,6 +425,21 @@ input {
 .pill {
   background: rgba(255, 255, 255, 0.05);
   color: #d7def0;
+}
+
+.rank-badge {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(242, 192, 99, 0.14);
+  border: 1px solid rgba(242, 192, 99, 0.24);
+  color: #f8d99e;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.rank-line {
+  margin: 8px 0 0;
 }
 
 .champion-list {
