@@ -1,4 +1,4 @@
-export function SearchPanel({ query, onQueryChange, onSubmit, loading }) {
+export function SearchPanel({ query, onQueryChange, onSubmit, onRefresh, loading }) {
   return (
     <section className="search-strip">
       <div className="search-copy">
@@ -39,6 +39,10 @@ export function SearchPanel({ query, onQueryChange, onSubmit, loading }) {
 
         <button type="button" className="primary-button" onClick={onSubmit} disabled={loading}>
           {loading ? "Chargement" : "Afficher"}
+        </button>
+
+        <button type="button" className="secondary-button" onClick={onRefresh} disabled={loading}>
+          Actualiser
         </button>
       </div>
     </section>

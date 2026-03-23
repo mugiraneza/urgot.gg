@@ -110,7 +110,7 @@ export function MatchesTable({
                   <div className="match-summary">
                     <div className="match-lane">
                       <span className="result-chip">{match.win ? "Victoire" : "Défaite"}</span>
-                      <small>{formatTime(match.end_time)}</small>
+                      <small style={'align-content:center'}>{formatTime(match.end_time)}</small>
                       <small>{match.queue_name}</small>
                     </div>
 

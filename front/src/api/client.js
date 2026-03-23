@@ -35,3 +35,28 @@ export function fetchFrontMatches(params) {
 export function fetchFrontDashboard(params) {
   return request("/front/dashboard/", params);
 }
+
+export async function triggerMatchImport({ riot_id, region = "europe" }) {
+  const url = new URL(`${API_BASE}/import/import-matches/`, window.location.origin);
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ riot_id, region }),
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message =
+      typeof body === "string"
+        ? body
+        : body?.detail || body?.error || body?.message || `Erreur API ${response.status}`;
+    throw new Error(message);
+  }
+
+  return body;
+}

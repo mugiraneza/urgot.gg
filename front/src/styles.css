@@ -172,7 +172,7 @@ input {
 
 .search-strip-controls {
   display: grid;
-  grid-template-columns: auto minmax(260px, 420px) auto;
+  grid-template-columns: auto minmax(240px, 420px) auto auto;
   gap: 10px;
   align-items: center;
 }
@@ -578,6 +578,12 @@ input {
 .alert-error {
   border-color: rgba(208, 104, 104, 0.3);
   background: rgba(93, 30, 35, 0.66);
+}
+
+.alert-info {
+  border-color: rgba(91, 140, 255, 0.28);
+  background: rgba(30, 49, 88, 0.72);
+  color: #d9e6ff;
 }
 
 .empty-state {

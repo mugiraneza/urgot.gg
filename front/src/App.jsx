@@ -1,5 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
-import { fetchFrontDashboard, fetchFrontMatches } from "./api/client";
+import { fetchFrontDashboard, fetchFrontMatches, triggerMatchImport } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { SearchPanel } from "./components/SearchPanel";
 import { MatchesTable } from "./components/MatchesTable";
@@ -16,6 +16,7 @@ export function App() {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [matches, setMatches] = useState([]);
   const [matchesPagination, setMatchesPagination] = useState({ next: null, previous: null, count: 0, page: 1 });
   const [selectedMatchId, setSelectedMatchId] = useState(null);
@@ -42,6 +43,7 @@ export function App() {
 
     setLoading(true);
     setError("");
+    setInfo("");
 
     try {
       const [matchesResponse, dashboardResponse] = await Promise.all([
@@ -75,6 +77,52 @@ export function App() {
     }
   }
 
+  async function handleRefresh() {
+    if (!queryParams) {
+      setError("Renseigne un Riot ID ou un PUUID.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setInfo("");
+
+    try {
+      if (query.mode === "riot_name") {
+        const importResponse = await triggerMatchImport({
+          riot_id: query.value.trim(),
+          region: "europe",
+        });
+        setInfo(importResponse.message || "Import lancé en arrière-plan.");
+      } else {
+        setInfo("Actualisation locale lancée.");
+      }
+
+      const [matchesResponse, dashboardResponse] = await Promise.all([
+        fetchFrontMatches({ ...queryParams, page: 1 }),
+        fetchFrontDashboard(queryParams),
+      ]);
+
+      const matchResults = matchesResponse.results || [];
+      setMatches(matchResults);
+      setMatchesPagination({
+        next: matchesResponse.next,
+        previous: matchesResponse.previous,
+        count: matchesResponse.count || 0,
+        page: 1,
+      });
+      setSelectedMatchId(matchResults[0]?.match_id || null);
+      setGlobalStats(dashboardResponse.overview || null);
+      setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
+      setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
+      setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
+    } catch (refreshError) {
+      setError(refreshError.message || "Impossible d'actualiser les données.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const activeMatch = matches.find((match) => match.match_id === selectedMatchId) || matches[0] || null;
 
   return (
@@ -83,10 +131,12 @@ export function App() {
         query={query}
         onQueryChange={setQuery}
         onSubmit={() => loadDashboard(1)}
+        onRefresh={handleRefresh}
         loading={loading}
       />
 
       {error ? <div className="alert alert-error">{error}</div> : null}
+      {info ? <div className="alert alert-info">{info}</div> : null}
 
       {!hasQuery ? (
         <div className="empty-state">
