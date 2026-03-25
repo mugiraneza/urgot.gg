@@ -111,6 +111,13 @@ def _format_rank_label(participant):
     return label
 
 
+def _build_rank_icon_name(rank_tier):
+    if not rank_tier:
+        return None
+    normalized_tier = rank_tier.strip().title()
+    return f"Rank={normalized_tier}"
+
+
 def _build_match_details(request, filters):
     user_participants = (
         Participant.objects.filter(**filters)
@@ -266,7 +273,7 @@ def _build_champion_pool(request, filters):
     return sorted(result, key=lambda item: item["games"], reverse=True)
 
 
-def _build_global_overview(filters):
+def _build_global_overview(request, filters):
     participants = list(
         Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
     )
@@ -329,6 +336,7 @@ def _build_global_overview(filters):
         "games_analyzed": total_games,
         "winrate": round((total_wins / total_games) * 100, 1) if total_games else 0,
         "player_elo": _format_rank_label(latest_ranked_participant) if latest_ranked_participant else None,
+        "player_elo_icon_url": _build_asset_url(request, "elo", _build_rank_icon_name(latest_ranked_participant.rank_tier)) if latest_ranked_participant else None,
         "oldest_match": first_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "most_recent_match": last_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "total_time_played": format_duration(total_time_played_sec),
@@ -465,7 +473,7 @@ class RiotAssetView(views.APIView):
     """
 
     def get(self, request, asset_type, filename):
-        allowed_types = {"champions", "items", "spells", "passives"}
+        allowed_types = {"champions", "items", "spells", "passives", "elo"}
         if asset_type not in allowed_types:
             raise Http404("Unknown asset type")
 
@@ -502,7 +510,7 @@ class FrontDashboardView(views.APIView):
         if error_response:
             return error_response
 
-        overview = _build_global_overview(filters)
+        overview = _build_global_overview(request, filters)
         if overview is None:
             return Response({"message": "Aucune donnée trouvée.", "source": "local_db"}, status=200)
 

@@ -261,6 +261,20 @@ input {
   align-items: center;
 }
 
+.profile-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.rank-emblem {
+  width: 55px;
+  height: 55px;
+  object-fit: contain;
+  flex: 0 0 34px;
+}
+
 .avatar-ring {
   width: 74px;
   height: 74px;

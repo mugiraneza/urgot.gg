@@ -2,8 +2,17 @@ function statValue(value) {
   return value || "N/A";
 }
 
+function buildRankIconUrl(rankTier) {
+  if (!rankTier) {
+    return null;
+  }
+  const normalizedTier = `${rankTier}`.trim();
+  return `/api/assets/elo/elo/Rank=${normalizedTier}.png`;
+}
+
 export function StatsOverview({ stats, query, activeMatch }) {
   const eloLabel = stats?.player_elo || activeMatch?.rank_label || "Elo inconnu";
+  const eloIconUrl = stats?.player_elo_icon_url || buildRankIconUrl(activeMatch?.rank_tier);
 
   return (
     <section className="profile-card">
@@ -12,7 +21,10 @@ export function StatsOverview({ stats, query, activeMatch }) {
         <div>
           <p className="eyebrow">Profil</p>
           <h3>{query.value || "Joueur local"}</h3>
-          <p className="muted">{eloLabel}</p>
+          <div className="profile-rank-row">
+            {eloIconUrl ? <img className="rank-emblem" src={eloIconUrl} alt={eloLabel} /> : null}
+            <p className="muted">{eloLabel}</p>
+          </div>
         </div>
       </div>
 
