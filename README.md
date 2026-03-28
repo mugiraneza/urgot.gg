@@ -42,8 +42,8 @@ Documentation frontend : [front/README.md](C:/git/urgot.gg/front/README.md)
 
 - [back](C:/git/urgot.gg/back) : backend Django
 - [front](C:/git/urgot.gg/front) : frontend Vite/Preact
-- [static](C:/git/urgot.gg/static) : assets statiques de projet
-- [docker-compose.yml](C:/git/urgot.gg/docker-compose.yml) : orchestration Docker
+- [static](C:/git/urgot.gg/static) : assets statiques de projet 
+- [docker-compose.yml](C:/git/urgot.gg/docker-compose.yml) : orchestration Docker (ne fonctionne pas encore)
 - [requirements.txt](C:/git/urgot.gg/requirements.txt) : dépendances Python racine
 
 ## Fonctionnalités clés
