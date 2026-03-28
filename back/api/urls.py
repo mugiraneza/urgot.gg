@@ -14,6 +14,7 @@ urlpatterns = [
     path("assets/<str:asset_type>/<path:filename>", views.RiotAssetView.as_view(), name="riot-asset"),
     path("front/dashboard/", views.FrontDashboardView.as_view(), name="front-dashboard"),
     path("front/matches/", views.FrontMatchesView.as_view(), name="front-matches"),
+    path("front/recent-riot-ids/", views.RecentRiotIdsView.as_view(), name="front-recent-riot-ids"),
     path('import/import-champs-items/', views.TriggerChampionItemImportViewSet.as_view(), name='import-champs-items'),  # note le `/` à la fin
     path('import/import-matches/', views.TriggerMatchImportViewSet.as_view(), name='import-matches'),  # note le `/` à la fin
     path('import/count-matches/', views.MatchcountViewSet.as_view(), name='count-matches'),  # idem ici

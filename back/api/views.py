@@ -21,6 +21,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from datetime import datetime, timedelta
 from collections import defaultdict
+from django.core.cache import cache
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -36,6 +37,9 @@ matplotlib.use('Agg')
 #region variable globale
 running_imports = {}
 SIDE_MAP = {100: "BLUE", 200: "RED"}
+RECENT_RIOT_IDS_CACHE_KEY = "recent_riot_ids"
+RECENT_RIOT_IDS_LIMIT = 8
+RECENT_RIOT_IDS_TTL = 60 * 60 * 24 * 7
 QUEUE_NAMES = {
     400: "Normal Blind Pick",
     420: "Ranked Solo/Duo",
@@ -65,6 +69,21 @@ QUEUE_NAMES = {
 #EndOfRegion Variable Global
 
 
+def _store_recent_riot_id(riot_id):
+    normalized = (riot_id or "").strip()
+    if not normalized:
+        return
+
+    recent_ids = cache.get(RECENT_RIOT_IDS_CACHE_KEY, [])
+    recent_ids = [value for value in recent_ids if value.lower() != normalized.lower()]
+    recent_ids.insert(0, normalized)
+    cache.set(RECENT_RIOT_IDS_CACHE_KEY, recent_ids[:RECENT_RIOT_IDS_LIMIT], RECENT_RIOT_IDS_TTL)
+
+
+def _get_recent_riot_ids():
+    return cache.get(RECENT_RIOT_IDS_CACHE_KEY, [])
+
+
 def _get_player_filters(request):
     puuid = request.GET.get("puuid")
     riot_name = request.GET.get("riot_name")
@@ -76,6 +95,7 @@ def _get_player_filters(request):
     if puuid:
         filters["puuid"] = puuid
     if riot_name:
+        _store_recent_riot_id(riot_name)
         filters["riot_name__iexact"] = riot_name
     return filters, None
 
@@ -485,6 +505,34 @@ def _build_cs_evolution(filters):
         )
     return result
 
+
+def _build_lp_evolution(filters):
+    snapshot_filters = {}
+    if filters.get("puuid"):
+        snapshot_filters["puuid"] = filters["puuid"]
+
+    if filters.get("riot_name__iexact"):
+        snapshot_filters["riot_name__iexact"] = filters["riot_name__iexact"]
+
+    snapshots = RankSnapshot.objects.filter(**snapshot_filters).select_related("match").order_by("match__game_creation", "captured_at")
+    if not snapshots.exists():
+        return []
+
+    return [
+        {
+            "match_id": snapshot.match.match_id,
+            "date": datetime.fromtimestamp(snapshot.match.game_end_ts / 1000).strftime("%Y-%m-%d %H:%M"),
+            "lp": snapshot.league_points,
+            "tier": snapshot.tier,
+            "rank_division": snapshot.rank_division,
+            "queue_type": snapshot.queue_type,
+            "wins": snapshot.wins,
+            "losses": snapshot.losses,
+        }
+        for snapshot in snapshots
+        if snapshot.league_points is not None
+    ]
+
 class MatchViewSet(viewsets.ModelViewSet):
     """
     API pour gérer les objets Match.
@@ -582,6 +630,7 @@ class FrontDashboardView(views.APIView):
                 "modes": _build_mode_stats(filters),
                 "champions": _build_champion_pool(request, filters),
                 "cs_evolution": _build_cs_evolution(filters),
+                "lp_evolution": _build_lp_evolution(filters),
             },
             status=200,
         )
@@ -612,6 +661,15 @@ class FrontMatchesView(views.APIView):
         response.data["source"] = "local_db"
         return response
 
+
+class RecentRiotIdsView(views.APIView):
+    @swagger_auto_schema(
+        operation_description="Retourne les Riot ID recherches recemment depuis le cache.",
+        responses={200: openapi.Response(description="Liste des Riot ID recents")},
+    )
+    def get(self, request):
+        return Response({"results": _get_recent_riot_ids()}, status=200)
+
 #bloc des statistiques
 class TriggerMatchImportViewSet(views.APIView):
     """
@@ -637,6 +695,7 @@ class TriggerMatchImportViewSet(views.APIView):
         try:
             riot_id = request.data.get("riot_id", "proctologue#urgot")
             region = request.data.get("region", "europe")
+            _store_recent_riot_id(riot_id)
             existing_thread = running_imports.get(riot_id)
             if existing_thread and existing_thread.is_alive():
                 return Response(

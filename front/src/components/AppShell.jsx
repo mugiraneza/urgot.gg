@@ -5,7 +5,7 @@ export function AppShell({ loading, playerLabel, children }) {
         <div className="brand-block">
           <div className="brand-mark">U</div>
           <div>
-            <p className="topbar-label">LOCAL DB DASHBOARD</p>
+            <p className="topbar-label">TABLEAU DE BORD LOCAL</p>
             <h1>Urgot.GG</h1>
           </div>
         </div>
@@ -13,7 +13,7 @@ export function AppShell({ loading, playerLabel, children }) {
         <div className="topbar-player">
           <span className="player-chip">{playerLabel || "Aucun joueur chargé"}</span>
           <span className={`topbar-status ${loading ? "is-loading" : ""}`}>
-            {loading ? "sync" : "local"}
+            {loading ? "synchronisation" : "local"}
           </span>
         </div>
       </header>

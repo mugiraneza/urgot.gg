@@ -10,12 +10,12 @@ function buildRankIconUrl(rankTier) {
   return `/api/assets/elo/elo/Rank=${normalizedTier}.png`;
 }
 
-function WinrateChart({ winrate = 0, games = 0 }) {
+function WinrateChart({ winrate = 0 }) {
   const safeWinrate = Math.max(0, Math.min(100, Number(winrate) || 0));
 
   return (
     <div className="winrate-card">
-      <div className="winrate-chart" aria-label={`Winrate ${safeWinrate.toFixed(1)} pourcent`}>
+      <div className="winrate-chart" aria-label={`Taux de victoire de ${safeWinrate.toFixed(1)} pour cent`}>
         <svg viewBox="0 0 36 36" className="circular-chart">
           <path
             className="circle-bg"
@@ -58,7 +58,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
       </div>
 
       <div className="profile-highlight">
-        <WinrateChart winrate={stats?.winrate} games={stats?.games_analyzed || 0} />
+        <WinrateChart winrate={stats?.winrate} />
         <div>
           <span>Temps</span>
           <strong>{statValue(stats?.total_time_played)}</strong>
@@ -67,7 +67,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
 
       {activeMatch ? (
         <div className="focus-card">
-          <p className="eyebrow">Partie selectionnee</p>
+          <p className="eyebrow">Partie sélectionnée</p>
           <div className="focus-title">
             {activeMatch.champion_image_url ? (
               <img className="champion-icon champion-icon-lg" src={activeMatch.champion_image_url} alt={activeMatch.champion} />
@@ -81,7 +81,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
             <span>{activeMatch.queue_name}</span>
           </div>
           <div className="focus-meta">
-            <span>{activeMatch.position || "UNKNOWN"}</span>
+            <span>{activeMatch.position || "Inconnue"}</span>
             <span>{activeMatch.kill_participation}% KP</span>
             <span>{activeMatch.kda_ratio} KDA</span>
           </div>
@@ -90,7 +90,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
 
       <div className="mini-stat-list">
         <div className="mini-stat">
-          <span>People met</span>
+          <span>Joueurs rencontrés</span>
           <strong>{statValue(stats?.people_met)}</strong>
         </div>
       </div>

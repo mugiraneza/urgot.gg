@@ -2,7 +2,7 @@ import os
 import time
 import requests
 from typing import Dict, List, Tuple
-from api.models import Match, Participant, Team, Ban, Objective, Death,Item,Champion
+from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
 
 RIOT_API_KEY = os.getenv("RIOT_KEY")
 MAX_MATCHES = int(1000)
@@ -16,7 +16,7 @@ def _get_json(url: str) -> Dict:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code == 429:
             wait = int(r.headers.get("Retry-After", 5))
-            print(f"[!] 429 – Rate limited. Waiting {wait}s...")
+            print(f"[!] 429 â€“ Rate limited. Waiting {wait}s...")
             time.sleep(wait)
             continue
         r.raise_for_status()
@@ -95,6 +95,28 @@ def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
 
     RANK_CACHE[cache_key] = entries[0] if entries else {}
     return RANK_CACHE[cache_key]
+
+
+def store_rank_snapshot(match_id: str, puuid: str, riot_name: str) -> None:
+    platform_region = get_platform_region(match_id)
+    rank_entry = get_rank_entry_for_puuid(puuid, platform_region)
+    if not rank_entry:
+        return
+
+    match = Match.objects.get(pk=match_id)
+    RankSnapshot.objects.update_or_create(
+        match=match,
+        puuid=puuid,
+        queue_type=rank_entry.get("queueType", ""),
+        defaults={
+            "riot_name": riot_name,
+            "tier": rank_entry.get("tier", ""),
+            "rank_division": rank_entry.get("rank", ""),
+            "league_points": rank_entry.get("leaguePoints"),
+            "wins": rank_entry.get("wins"),
+            "losses": rank_entry.get("losses"),
+        },
+    )
 
 
 def _extract_ping_stats(participant: Dict) -> Dict:
@@ -325,8 +347,8 @@ def run_match_import(riot_id: str, region: str):
     all_ids = get_all_match_ids(puuid, region, MAX_MATCHES)
     to_do = [mid for mid in all_ids if mid not in existing]
 
-    print(f"[i] {len(existing)} match(s) déjà en base")
-    print(f"[i] {len(to_do)} match(s) à importer")
+    print(f"[i] {len(existing)} match(s) dÃ©jÃ  en base")
+    print(f"[i] {len(to_do)} match(s) Ã  importer")
 
     for i, mid in enumerate(to_do, 1):
         print(f"[{i}/{len(to_do)}] Import {mid}")
@@ -340,4 +362,9 @@ def run_match_import(riot_id: str, region: str):
         insert_skill_orders(mid, timeline)
         time.sleep(DELAY_SEC)
 
-    print("✅ Import terminé.")
+
+    if to_do:
+        # Riot ne fournit pas le LP gagne/perdu dans les donnees de match.
+        # On capture l'etat classe courant et on l'associe au match le plus recent importe.
+        store_rank_snapshot(to_do[0], puuid, riot_id)
+    print("âœ… Import terminÃ©.")

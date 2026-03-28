@@ -1,5 +1,5 @@
-import { useMemo, useState } from "preact/hooks";
-import { fetchFrontDashboard, fetchFrontMatches, triggerMatchImport } from "./api/client";
+import { useEffect, useMemo, useState } from "preact/hooks";
+import { fetchFrontDashboard, fetchFrontMatches, fetchRecentRiotIds, triggerMatchImport } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { SearchPanel } from "./components/SearchPanel";
 import { MatchesTable } from "./components/MatchesTable";
@@ -13,6 +13,58 @@ const DEFAULT_QUERY = {
   value: "",
 };
 
+const RECENT_RIOT_IDS_STORAGE_KEY = "urgot_recent_riot_ids";
+const RECENT_RIOT_IDS_LIMIT = 8;
+
+function normalizeRecentRiotIds(values) {
+  const recentIds = Array.isArray(values) ? values : [];
+  const deduped = [];
+  const seen = new Set();
+
+  recentIds.forEach((value) => {
+    const normalizedValue = `${value || ""}`.trim();
+    const normalizedKey = normalizedValue.toLowerCase();
+    if (!normalizedValue || seen.has(normalizedKey)) {
+      return;
+    }
+    seen.add(normalizedKey);
+    deduped.push(normalizedValue);
+  });
+
+  return deduped.slice(0, RECENT_RIOT_IDS_LIMIT);
+}
+
+function readRecentRiotIdsFromStorage() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(RECENT_RIOT_IDS_STORAGE_KEY);
+    if (!rawValue) {
+      return [];
+    }
+    return normalizeRecentRiotIds(JSON.parse(rawValue));
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentRiotIdsToStorage(values) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      RECENT_RIOT_IDS_STORAGE_KEY,
+      JSON.stringify(normalizeRecentRiotIds(values)),
+    );
+  } catch {
+    // Ignore storage failures and keep the in-memory state.
+  }
+}
+
 export function App() {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [loading, setLoading] = useState(false);
@@ -25,6 +77,8 @@ export function App() {
   const [championStats, setChampionStats] = useState([]);
   const [modeStats, setModeStats] = useState([]);
   const [csEvolution, setCsEvolution] = useState([]);
+  const [lpEvolution, setLpEvolution] = useState([]);
+  const [recentRiotIds, setRecentRiotIds] = useState(() => readRecentRiotIdsFromStorage());
 
   const hasQuery = query.value.trim().length > 0;
   const queryParams = useMemo(() => {
@@ -36,10 +90,43 @@ export function App() {
       : { riot_name: query.value.trim() };
   }, [hasQuery, query]);
 
+  function updateRecentRiotIds(nextValues) {
+    const normalizedValues = normalizeRecentRiotIds(nextValues);
+    setRecentRiotIds(normalizedValues);
+    writeRecentRiotIdsToStorage(normalizedValues);
+  }
+
+  function pushRecentRiotId(riotId) {
+    const normalizedValue = `${riotId || ""}`.trim();
+    if (!normalizedValue) {
+      return;
+    }
+
+    const currentValues = readRecentRiotIdsFromStorage();
+    updateRecentRiotIds([normalizedValue, ...currentValues, ...recentRiotIds]);
+  }
+
+  async function loadRecentRiotIds() {
+    try {
+      const response = await fetchRecentRiotIds();
+      updateRecentRiotIds([...(Array.isArray(response?.results) ? response.results : []), ...readRecentRiotIdsFromStorage()]);
+    } catch {
+      updateRecentRiotIds(readRecentRiotIdsFromStorage());
+    }
+  }
+
+  useEffect(() => {
+    loadRecentRiotIds();
+  }, []);
+
   async function loadDashboard(nextPage = 1) {
     if (!queryParams) {
       setError("Renseigne un Riot ID ou un PUUID.");
       return;
+    }
+
+    if (query.mode === "riot_name") {
+      pushRecentRiotId(query.value);
     }
 
     setLoading(true);
@@ -71,8 +158,10 @@ export function App() {
       setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
       setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
+      setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
+      await loadRecentRiotIds();
     } catch (loadError) {
-      setError(loadError.message || "Impossible de charger le dashboard.");
+      setError(loadError.message || "Impossible de charger le tableau de bord.");
     } finally {
       setLoading(false);
     }
@@ -82,6 +171,10 @@ export function App() {
     if (!queryParams) {
       setError("Renseigne un Riot ID ou un PUUID.");
       return;
+    }
+
+    if (query.mode === "riot_name") {
+      pushRecentRiotId(query.value);
     }
 
     setLoading(true);
@@ -117,6 +210,8 @@ export function App() {
       setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
       setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
+      setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
+      await loadRecentRiotIds();
     } catch (refreshError) {
       setError(refreshError.message || "Impossible d'actualiser les données.");
     } finally {
@@ -134,6 +229,7 @@ export function App() {
         onSubmit={() => loadDashboard(1)}
         onRefresh={handleRefresh}
         loading={loading}
+        recentRiotIds={recentRiotIds}
       />
 
       {error ? <div className="alert alert-error">{error}</div> : null}
@@ -156,10 +252,10 @@ export function App() {
               subtitle="Base locale"
               type="doughnut"
               data={{
-                labels: modeStats.map((mode) => mode.queue_name || `Queue ${mode.queue}`),
+                labels: modeStats.map((mode) => mode.queue_name || `File ${mode.queue}`),
                 datasets: [
                   {
-                    label: "Games",
+                    label: "Parties",
                     data: modeStats.map((mode) => mode.total_games),
                     backgroundColor: ["#5b8cff", "#9f7aea", "#f6ad55", "#63b3ed", "#f56565", "#68d391"],
                     borderWidth: 0,
@@ -168,6 +264,25 @@ export function App() {
               }}
             />
             <ChampionStatsTable rows={championStats.slice(0, 8)} />
+            <ChartCard
+              title="Évolution LP"
+              subtitle="Snapshots classés"
+              type="line"
+              data={{
+                labels: lpEvolution.map((entry) => entry.date.slice(5, 16)),
+                datasets: [
+                  {
+                    label: "LP",
+                    data: lpEvolution.map((entry) => entry.lp),
+                    borderColor: "#5377d8",
+                    backgroundColor: "rgba(83,119,216,0.16)",
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true,
+                  },
+                ],
+              }}
+            />
             <ChartCard
               title="CS / min"
               subtitle="Tendance récente"

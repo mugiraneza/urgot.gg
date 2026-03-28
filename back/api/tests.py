@@ -4,10 +4,11 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
-from .models import Champion, Item, Match, Participant
-from .services.riot_importer import insert_participants, insert_skill_orders
+from .models import Champion, Item, Match, Participant, RankSnapshot
+from .services.riot_importer import insert_participants, insert_skill_orders, store_rank_snapshot
 from .views import running_imports
 
 
@@ -98,9 +99,11 @@ class TriggerMatchImportViewSetTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         running_imports.clear()
+        cache.clear()
 
     def tearDown(self):
         running_imports.clear()
+        cache.clear()
 
     @patch("api.views.threading.Thread")
     def test_import_is_started_only_once(self, thread_cls):
@@ -116,6 +119,22 @@ class TriggerMatchImportViewSetTests(TestCase):
         self.assertEqual(response.status_code, 202)
         thread_cls.assert_called_once()
         thread.start.assert_called_once()
+
+    @patch("api.views.threading.Thread")
+    def test_import_stores_recent_riot_id_in_cache(self, thread_cls):
+        thread = thread_cls.return_value
+        thread.is_alive.return_value = False
+
+        self.client.post(
+            reverse("import-matches"),
+            {"riot_id": "Recent#EUW", "region": "europe"},
+            format="json",
+        )
+
+        response = self.client.get(reverse("front-recent-riot-ids"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"][0], "Recent#EUW")
 
 
 class GlobalStatsViewTests(TestCase):
@@ -161,6 +180,7 @@ class GlobalStatsViewTests(TestCase):
 class FrontApiViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        cache.clear()
         self.champion = Champion.objects.create(
             champion_id="Urgot",
             key="6",
@@ -245,6 +265,18 @@ class FrontApiViewTests(TestCase):
         )
 
     def test_front_dashboard_reads_local_db(self):
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_SOLO_5x5",
+            tier="GOLD",
+            rank_division="II",
+            league_points=47,
+            wins=12,
+            losses=9,
+        )
+
         response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
 
         self.assertEqual(response.status_code, 200)
@@ -254,6 +286,7 @@ class FrontApiViewTests(TestCase):
         self.assertIn("champions", payload)
         self.assertIn("modes", payload)
         self.assertIn("cs_evolution", payload)
+        self.assertEqual(payload["lp_evolution"][0]["lp"], 47)
 
     def test_front_matches_reads_local_db(self):
         response = self.client.get(reverse("front-matches"), {"riot_name": "player#euw"})
@@ -277,6 +310,16 @@ class FrontApiViewTests(TestCase):
         participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in payload["results"][0]["participants"]}
         self.assertEqual(participant_ranks["player#euw"], "GOLD II - 47 LP")
         self.assertEqual(participant_ranks["ally#euw"], "SILVER I - 12 LP")
+
+    def test_front_dashboard_stores_recent_riot_ids(self):
+        self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+        self.client.get(reverse("front-dashboard"), {"riot_name": "ally#euw"})
+        self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+
+        response = self.client.get(reverse("front-recent-riot-ids"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"], ["player#euw", "ally#euw"])
 
 
 class RiotImporterAdvancedFieldsTests(TestCase):
@@ -429,3 +472,23 @@ class RiotImporterAdvancedFieldsTests(TestCase):
 
         participant = Participant.objects.get(match=self.match, participant_id=1)
         self.assertEqual(participant.skill_order, [1, 3, 1])
+
+    @patch(
+        "api.services.riot_importer.get_rank_entry_for_puuid",
+        return_value={
+            "queueType": "RANKED_SOLO_5x5",
+            "tier": "PLATINUM",
+            "rank": "IV",
+            "leaguePoints": 23,
+            "wins": 40,
+            "losses": 35,
+        },
+    )
+    def test_store_rank_snapshot_persists_current_rank_state(self, _mock_rank):
+        store_rank_snapshot(self.match.match_id, "player-1", "player#euw")
+
+        snapshot = RankSnapshot.objects.get(match=self.match, puuid="player-1")
+        self.assertEqual(snapshot.queue_type, "RANKED_SOLO_5x5")
+        self.assertEqual(snapshot.tier, "PLATINUM")
+        self.assertEqual(snapshot.rank_division, "IV")
+        self.assertEqual(snapshot.league_points, 23)

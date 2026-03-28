@@ -36,6 +36,10 @@ export function fetchFrontDashboard(params) {
   return request("/front/dashboard/", params);
 }
 
+export function fetchRecentRiotIds() {
+  return request("/front/recent-riot-ids/");
+}
+
 export async function triggerMatchImport({ riot_id, region = "europe" }) {
   const url = new URL(`${API_BASE}/import/import-matches/`, window.location.origin);
   const response = await fetch(url.toString(), {

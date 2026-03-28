@@ -3,8 +3,8 @@ export function ChampionStatsTable({ rows }) {
     <section className="side-card">
       <div className="section-header compact">
         <div>
-          <p className="eyebrow">Performance champion</p>
-          <h2>Champion pool</h2>
+          <p className="eyebrow">Performances champions</p>
+          <h2>Pool de champions</h2>
         </div>
       </div>
 
@@ -20,7 +20,7 @@ export function ChampionStatsTable({ rows }) {
                 <strong>{row.champion}</strong>
               </div>
               <small>
-                {row.games} games • {row.win_rate}% WR
+                {row.games} parties • {row.win_rate}% de victoires
               </small>
             </div>
             <div className="champion-values">

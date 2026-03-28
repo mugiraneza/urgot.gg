@@ -90,7 +90,7 @@ export function MatchesTable({
       <div className="section-header">
         <div>
           <p className="eyebrow">Historique</p>
-          <h2>Feed de matchs</h2>
+          <h2>Flux de matchs</h2>
         </div>
         <span className="pill">{pagination.count} parties locales</span>
       </div>
@@ -113,7 +113,7 @@ export function MatchesTable({
                   <div className="match-summary">
                     <div className="match-lane">
                       <span className="result-chip">{match.win ? "Victoire" : "Défaite"}</span>
-                      <small style={'align-content:center'}>{formatTime(match.end_time)}</small>
+                      <small style={"align-content:center"}>{formatTime(match.end_time)}</small>
                       <small>{match.queue_name}</small>
                     </div>
 
@@ -127,7 +127,7 @@ export function MatchesTable({
                           {match.rank_label ? <span className="rank-badge">{match.rank_label}</span> : null}
                         </div>
                       </div>
-                      <span>{match.position || "UNKNOWN"}</span>
+                      <span>{match.position || "Inconnue"}</span>
                     </div>
 
                     <div className="match-kda">
@@ -144,27 +144,27 @@ export function MatchesTable({
                     </div>
 
                     <div className="match-items">
-                      {match.items.map((item, index) => (
+                      {match.items.map((item, index) =>
                         item?.image_url ? (
                           <img
                             className="item-icon"
                             key={`${match.match_id}-${index}`}
                             src={item.image_url}
-                            alt={item.name || `Item ${index + 1}`}
+                            alt={item.name || `Objet ${index + 1}`}
                           />
                         ) : (
                           <span className="item-dot" key={`${match.match_id}-${index}`}>
                             -
                           </span>
-                        )
-                      ))}
+                        ),
+                      )}
                     </div>
                   </div>
 
                   {isSelected ? (
                     <div className="match-expanded">
-                      <TeamRoster title="Blue Side" players={bluePlayers} />
-                      <TeamRoster title="Red Side" players={redPlayers} />
+                      <TeamRoster title="Équipe bleue" players={bluePlayers} />
+                      <TeamRoster title="Équipe rouge" players={redPlayers} />
                     </div>
                   ) : null}
                 </article>

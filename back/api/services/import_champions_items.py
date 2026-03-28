@@ -440,31 +440,28 @@ class RiotDataImporter:
                         }
                     )
                     
-                    # Importe les objets "from" (composants requis)
-                    if 'from' in item_data:
-                        item.from_items.all().delete()
-                        for from_item_id in item_data['from']:
-                            ItemFrom.objects.create(
-                                item=item,
-                                from_item_id=from_item_id
-                            )
-                    
-                    # Importe les objets "into" (upgrades possibles)
-                    if 'into' in item_data:
-                        item.into_items.all().delete()
-                        for into_item_id in item_data['into']:
-                            ItemInto.objects.create(
-                                item=item,
-                                into_item_id=into_item_id
-                            )
+                    from_item_ids = list(dict.fromkeys(item_data.get('from', [])))
+                    into_item_ids = list(dict.fromkeys(item_data.get('into', [])))
+
+                    item.from_items.all().delete()
+                    for from_item_id in from_item_ids:
+                        ItemFrom.objects.create(
+                            item=item,
+                            from_item_id=from_item_id
+                        )
+
+                    item.into_items.all().delete()
+                    for into_item_id in into_item_ids:
+                        ItemInto.objects.create(
+                            item=item,
+                            into_item_id=into_item_id
+                        )
                 
                 imported_count += 1
-                
                 
                 # Version temporaire qui affiche juste les données
                 print(f"🔸 {item_data.get('name', 'Sans nom')} (ID: {item_id})")
                 print(f"   Prix: {item_data.get('gold', {}).get('total', 'N/A')}")
-                imported_count += 1
                 
                 # Petite pause
                 time.sleep(0.05)
@@ -473,7 +470,6 @@ class RiotDataImporter:
                 print(f"❌ Erreur lors de l'import de l'objet {item_id}: {e}")
                 continue
         
-        print("⚠️ Pour vraiment importer les objets, décommentez le code et ajoutez les modèles Item")
         print(f"✅ Import items terminé: {imported_count}/{total_items} objets traités")
 
 

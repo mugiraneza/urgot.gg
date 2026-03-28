@@ -115,6 +115,22 @@ class Participant(models.Model):
         unique_together = ('match', 'participant_id')
 
 
+class RankSnapshot(models.Model):
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="rank_snapshots")
+    puuid = models.CharField(max_length=100, db_index=True)
+    riot_name = models.CharField(max_length=100, db_index=True)
+    queue_type = models.CharField(max_length=50, blank=True, default="")
+    tier = models.CharField(max_length=20, blank=True, default="")
+    rank_division = models.CharField(max_length=10, blank=True, default="")
+    league_points = models.IntegerField(null=True, blank=True)
+    wins = models.IntegerField(null=True, blank=True)
+    losses = models.IntegerField(null=True, blank=True)
+    captured_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("match", "puuid", "queue_type")
+
+
 class Ban(models.Model):
     match = models.ForeignKey(Match, on_delete=models.CASCADE)
     team_id = models.IntegerField()
