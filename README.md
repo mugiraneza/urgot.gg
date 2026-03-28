@@ -92,10 +92,20 @@ import os
 
 
 def setEnv():
-    os.environ.setdefault("DJANGO_SECRET_KEY", "change-me-dev-secret")
-    os.environ.setdefault("DJANGO_DEBUG", "True")
-    os.environ.setdefault("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
-    os.environ.setdefault("RIOT_KEY", "RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+    # Base de données PostgreSQL
+    os.environ['POSTGRES_DBNAME']='lol_data_full'
+    os.environ['POSTGRES_USER']=''
+    os.environ['POSTGRES_PASS']=''
+    os.environ['POSTGRES_HOST']='db'
+    os.environ['POSTGRES_PORT']='5432'
+
+    # Django
+    os.environ['DJANGO_SECRET_KEY']="j|X@C:hN$VuBzSMf|@ibw$WXO|U$hgtceIZKINr73KRacZ20wgen.R"
+    os.environ['DJANGO_DEBUG']='True'
+    os.environ['DJANGO_ALLOWED_HOSTS']='localhost,127.0.0.1'
+
+    #  RIOT
+    os.environ['RIOT_KEY']='RGAPI-xxxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx'
 ```
 
 La clé Riot se récupère sur le portail officiel :
