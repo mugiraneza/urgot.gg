@@ -1,15 +1,16 @@
 import os
 from pathlib import Path
-from back.env import setEnv
+from dotenv import load_dotenv
 
-setEnv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR.parent / ".env")
+load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY =os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
 ALLOWED_HOSTS =  os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost").split(",")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
 # Application definition
 
 INSTALLED_APPS = [

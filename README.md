@@ -1,120 +1,50 @@
 # urgot.gg
-
-## Aperçu
-
 ![Page d'acceuil](/front.png?raw=true "Page d'acceuil")
 
-`urgot.gg` est un projet local d’analyse League of Legends construit autour d’une base de matchs importés depuis Riot.
+Application locale d'analyse League of Legends avec :
 
-Le projet permet de :
+- un backend Django dans [C:/git/urgot.gg/back](C:/git/urgot.gg/back)
+- un frontend Preact dans [C:/git/urgot.gg/front](C:/git/urgot.gg/front)
 
-- importer les parties d’un joueur à partir de son `Riot ID`
-- conserver les matchs et leurs détails dans une base locale
-- afficher un dashboard frontend orienté historique et statistiques
-- suivre les recherches récentes
-- suivre l’évolution du LP au fil des imports
+## Configuration
 
-## Architecture
+Le projet n'utilise plus `env.py`.
 
-### Backend
+La configuration est lue directement :
 
-Le backend Django :
+- depuis les variables d'environnement
+- depuis [C:/git/urgot.gg/.env](C:/git/urgot.gg/.env)
+- depuis [C:/git/urgot.gg/back/.env](C:/git/urgot.gg/back/.env)
 
-- importe les données Riot
-- stocke les matchs, participants, objets, champions et snapshots de rang
-- expose les endpoints REST consommés par le frontend
-- sert les assets Riot téléchargés localement
+Tu peux partir de [C:/git/urgot.gg/.env.example](C:/git/urgot.gg/.env.example).
 
-Documentation backend : [back/README.md](C:/git/urgot.gg/back/README.md)
+Exemple minimal :
 
-### Frontend
-
-Le frontend Preact :
-
-- interroge uniquement les endpoints `/api/front/...`
-- affiche un dashboard local avec une interface neumorphique
-- propose une recherche avec suggestions de `Riot ID` récents
-- affiche des graphiques pour les modes de jeu, le LP et le CS/min
-
-Documentation frontend : [front/README.md](C:/git/urgot.gg/front/README.md)
-
-## Structure du dépôt
-
-- [back](C:/git/urgot.gg/back) : backend Django
-- [front](C:/git/urgot.gg/front) : frontend Vite/Preact
-- [static](C:/git/urgot.gg/static) : assets statiques de projet 
-- [docker-compose.yml](C:/git/urgot.gg/docker-compose.yml) : orchestration Docker (ne fonctionne pas encore)
-- [requirements.txt](C:/git/urgot.gg/requirements.txt) : dépendances Python racine
-
-## Fonctionnalités clés
-
-### Import des matchs
-
-Le backend importe les matchs via Riot et remplit la base locale avec :
-
-- métadonnées de match
-- participants
-- rang courant du joueur importé
-- objets et champions liés
-- chronologie de morts et progression des sorts
-
-### Recherches récentes
-
-Les `Riot ID` récents sont conservés :
-
-- côté backend via le cache Django
-- côté frontend via `localStorage`
-
-Cela permet un affichage rapide des suggestions récentes même avant le retour complet de l’API.
-
-### Suivi LP
-
-Le projet suit l’évolution du LP par snapshots :
-
-- après un import de nouvelles parties, le backend enregistre l’état classé courant
-- le frontend affiche ensuite une courbe `Évolution LP`
-
-Limite importante :
-Riot ne fournit pas le `LP gagné/perdu` directement dans les données du match. Le suivi est donc pensé pour un usage au fil de l’eau, pas pour reconstituer parfaitement un historique ancien.
-
-## Démarrage rapide
-
-### Préparer `env.py`
-
-Avant de lancer le backend, il faut créer :
-
-- [back/env.py](C:/git/urgot.gg/back/env.py)
-
-Exemple :
-
-```python
-import os
-
-
-def setEnv():
-    # Base de données PostgreSQL
-    os.environ['POSTGRES_DBNAME']='lol_data_full'
-    os.environ['POSTGRES_USER']=''
-    os.environ['POSTGRES_PASS']=''
-    os.environ['POSTGRES_HOST']='db'
-    os.environ['POSTGRES_PORT']='5432'
-
-    # Django
-    os.environ['DJANGO_SECRET_KEY']="j|X@C:hN$xxxxxxxxxxxx|@ibw$WXO|U$xxxxxxxxxxxxxxxxxxxxxxxxxxxxx.R"
-    os.environ['DJANGO_DEBUG']='True'
-    os.environ['DJANGO_ALLOWED_HOSTS']='localhost,127.0.0.1'
-
-    #  RIOT
-    os.environ['RIOT_KEY']='RGAPI-xxxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx'
+```env
+DJANGO_SECRET_KEY=change-me
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,api
+RIOT_KEY=
 ```
 
-La clé Riot se récupère sur le portail officiel :
+## Lancement Docker
 
-- [Riot Developer Portal](https://developer.riotgames.com/docs/portal)
+Depuis `C:\git\urgot.gg` :
 
-La documentation officielle indique qu’une clé de développement est générée quand on se connecte au portail avec son compte Riot. Elle expire toutes les 24 heures, donc il faut la renouveler régulièrement pour le développement local.
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
 
-### Backend
+Acces :
+
+- Frontend : [http://localhost](http://localhost)
+- API : [http://localhost:8000/api/](http://localhost:8000/api/)
+- Swagger : [http://localhost:8000/swagger/](http://localhost:8000/swagger/)
+
+## Lancement local
+
+Backend :
 
 ```powershell
 venv\Scripts\activate
@@ -124,30 +54,10 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-### Frontend
-
-Dans un second terminal :
+Frontend :
 
 ```powershell
 cd front
 npm install
 npm run dev
 ```
-
-## URLs utiles
-
-- Backend API : [http://127.0.0.1:8000/api/](http://127.0.0.1:8000/api/)
-- Swagger : [http://127.0.0.1:8000/swagger/](http://127.0.0.1:8000/swagger/)
-- ReDoc : [http://127.0.0.1:8000/redoc/](http://127.0.0.1:8000/redoc/)
-- Frontend Vite : généralement [http://127.0.0.1:5173/](http://127.0.0.1:5173/)
-
-## Notes techniques
-
-- la base active actuelle est SQLite
-- le frontend consomme une API simplifiée pensée pour l’interface locale
-- l’UI suit un style neumorphique clair
-- la liste de suggestions du champ de recherche est custom pour être stylable, contrairement à une `datalist` native
-
-## Docker
-
-Un fichier [docker-compose.yml](C:/git/urgot.gg/docker-compose.yml) est présent, mais la configuration actuelle semble viser un setup différent de la base SQLite locale utilisée par `back/settings.py`. Il peut servir de base, mais mérite une harmonisation avant usage en production ou en environnement partagé.
