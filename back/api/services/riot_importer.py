@@ -96,6 +96,125 @@ def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
     RANK_CACHE[cache_key] = entries[0] if entries else {}
     return RANK_CACHE[cache_key]
 
+
+def _extract_ping_stats(participant: Dict) -> Dict:
+    return {
+        key: value
+        for key, value in participant.items()
+        if key.endswith("Pings") and value is not None
+    }
+
+
+def _extract_perk_data(participant: Dict) -> Dict:
+    perks = participant.get("perks") or {}
+    styles = perks.get("styles") or []
+    primary_style = styles[0] if len(styles) > 0 else {}
+    secondary_style = styles[1] if len(styles) > 1 else {}
+
+    return {
+        "perks": perks,
+        "primary_rune_style": primary_style.get("style"),
+        "secondary_rune_style": secondary_style.get("style"),
+        "primary_rune_selections": [
+            selection.get("perk")
+            for selection in primary_style.get("selections", [])
+            if selection.get("perk") is not None
+        ],
+        "secondary_rune_selections": [
+            selection.get("perk")
+            for selection in secondary_style.get("selections", [])
+            if selection.get("perk") is not None
+        ],
+        "stat_perks": perks.get("statPerks") or {},
+    }
+
+
+def _participant_defaults(p: Dict, rank_entry: Dict) -> Dict:
+    challenges = p.get("challenges") or {}
+    ping_stats = _extract_ping_stats(p)
+
+    defaults = {
+        "puuid": p["puuid"],
+        "riot_name": f"{p['riotIdGameName']}#{p['riotIdTagline']}",
+        "team_id": p["teamId"],
+        "champion_id": get_champion_id(p["championId"]),
+        "champion_name": p["championName"],
+        "individual_position": p["individualPosition"],
+        "role": p["role"],
+        "summoner1_id": p["summoner1Id"],
+        "summoner2_id": p["summoner2Id"],
+        "kills": p["kills"],
+        "deaths": p["deaths"],
+        "assists": p["assists"],
+        "total_damage_dealt_champs": p["totalDamageDealtToChampions"],
+        "damage_self_mitigated": p["damageSelfMitigated"],
+        "total_heal": p["totalHeal"],
+        "total_damage_shielded_on_teammates": p.get("totalDamageShieldedOnTeammates"),
+        "total_heals_on_teammates": p.get("totalHealsOnTeammates"),
+        "total_damage_taken": p["totalDamageTaken"],
+        "damage_dealt_to_objectives": p.get("damageDealtToObjectives"),
+        "damage_dealt_to_turrets": p.get("damageDealtToTurrets"),
+        "largest_killing_spree": p["largestKillingSpree"],
+        "killing_sprees": p.get("killingSprees"),
+        "largest_multi_kill": p.get("largestMultiKill"),
+        "penta_kills": p["pentaKills"],
+        "quadra_kills": p["quadraKills"],
+        "turret_kills": p.get("turretKills"),
+        "inhibitor_kills": p.get("inhibitorKills"),
+        "inhibitor_takedowns": p.get("inhibitorTakedowns"),
+        "turrets_lost": p.get("turretsLost"),
+        "objectives_stolen": p.get("objectivesStolen"),
+        "objectives_stolen_assists": p.get("objectivesStolenAssists"),
+        "solo_kills": p.get("soloKills"),
+        "vision_score": p["visionScore"],
+        "wards_placed": p["wardsPlaced"],
+        "detector_wards_placed": p.get("detectorWardsPlaced"),
+        "vision_wards_bought_in_game": p.get("visionWardsBoughtInGame"),
+        "wards_killed": p.get("wardsKilled"),
+        "stealth_wards_placed": p.get("stealthWardsPlaced"),
+        "vision_score_advantage_lane_opponent": challenges.get("visionScoreAdvantageLaneOpponent"),
+        "total_minions_killed": p["totalMinionsKilled"],
+        "neutral_minions_killed": p["neutralMinionsKilled"],
+        "time_ccing_others": p["timeCCingOthers"],
+        "item0": get_item_id(p["item0"]),
+        "item1": get_item_id(p["item1"]),
+        "item2": get_item_id(p["item2"]),
+        "item3": get_item_id(p["item3"]),
+        "item4": get_item_id(p["item4"]),
+        "item5": get_item_id(p["item5"]),
+        "item6": get_item_id(p["item6"]),
+        "gold_earned": p["goldEarned"],
+        "gold_spent": p["goldSpent"],
+        "champ_level": p["champLevel"],
+        "champ_experience": p["champExperience"],
+        "lane": p.get("lane", ""),
+        "lane_minions_first_10_minutes": challenges.get("laneMinionsFirst10Minutes"),
+        "jungle_cs_before_10_minutes": challenges.get("jungleCsBefore10Minutes"),
+        "gold_per_minute": challenges.get("goldPerMinute"),
+        "damage_per_minute": challenges.get("damagePerMinute"),
+        "champion_transform": p.get("championTransform"),
+        "win": bool(p["win"]),
+        "first_blood_kill": bool(p["firstBloodKill"]),
+        "first_tower_kill": bool(p["firstTowerKill"]),
+        "team_position": p["teamPosition"],
+        "team_early_surrendered": p.get("teamEarlySurrendered"),
+        "game_ended_in_early_surrender": p.get("gameEndedInEarlySurrender"),
+        "game_ended_in_surrender": p.get("gameEndedInSurrender"),
+        "longest_time_spent_living": p.get("longestTimeSpentLiving"),
+        "total_time_cc_dealt": p.get("totalTimeCCDealt"),
+        "time_played": p["timePlayed"],
+        "bait_pings": p.get("baitPings"),
+        "danger_pings": p.get("dangerPings"),
+        "get_back_pings": p.get("getBackPings"),
+        "ping_stats": ping_stats,
+        "rank_queue": rank_entry.get("queueType", ""),
+        "rank_tier": rank_entry.get("tier", ""),
+        "rank_division": rank_entry.get("rank", ""),
+        "rank_lp": rank_entry.get("leaguePoints"),
+    }
+    defaults.update(_extract_perk_data(p))
+    return defaults
+
 def insert_match(info: Dict, mid: str, obj:Dict):
     Match.objects.get_or_create(
         match_id=mid,
@@ -155,53 +274,29 @@ def insert_participants(mid: str, participants: List[Dict]):
         Participant.objects.get_or_create(
             match=match,
             participant_id=p["participantId"],
-            defaults={
-                "puuid": puuid,
-                "riot_name": f"{p['riotIdGameName']}#{p['riotIdTagline']}",
-                "team_id": p["teamId"],
-                "champion_id": get_champion_id(p["championId"]),
-                "champion_name": p["championName"],
-                "individual_position": p["individualPosition"],
-                "role": p["role"],
-                "summoner1_id": p["summoner1Id"],
-                "summoner2_id": p["summoner2Id"],
-                "kills": p["kills"],
-                "deaths": p["deaths"],
-                "assists": p["assists"],
-                "total_damage_dealt_champs": p["totalDamageDealtToChampions"],
-                "damage_self_mitigated": p["damageSelfMitigated"],
-                "total_heal": p["totalHeal"],
-                "total_damage_taken": p["totalDamageTaken"],
-                "largest_killing_spree": p["largestKillingSpree"],
-                "penta_kills": p["pentaKills"],
-                "quadra_kills": p["quadraKills"],
-                "vision_score": p["visionScore"],
-                "wards_placed": p["wardsPlaced"],
-                "total_minions_killed": p["totalMinionsKilled"],
-                "neutral_minions_killed": p["neutralMinionsKilled"],
-                "time_ccing_others": p["timeCCingOthers"],
-                "item0": get_item_id(p["item0"]),
-                "item1": get_item_id(p["item1"]),
-                "item2": get_item_id(p["item2"]),
-                "item3": get_item_id(p["item3"]),
-                "item4": get_item_id(p["item4"]),
-                "item5": get_item_id(p["item5"]),
-                "item6": get_item_id(p["item6"]),
-                "gold_earned": p["goldEarned"],
-                "gold_spent": p["goldSpent"],
-                "champ_level": p["champLevel"],
-                "champ_experience": p["champExperience"],
-                "win": bool(p["win"]),
-                "first_blood_kill": bool(p["firstBloodKill"]),
-                "first_tower_kill": bool(p["firstTowerKill"]),
-                "team_position": p["teamPosition"],
-                "time_played": p["timePlayed"],
-                "rank_queue": rank_entry.get("queueType", ""),
-                "rank_tier": rank_entry.get("tier", ""),
-                "rank_division": rank_entry.get("rank", ""),
-                "rank_lp": rank_entry.get("leaguePoints"),
-            },
+            defaults=_participant_defaults(p, rank_entry),
         )
+
+
+def insert_skill_orders(mid: str, timeline: Dict):
+    skill_orders = {}
+    for frame in timeline["info"]["frames"]:
+        for event in frame.get("events", []):
+            if event.get("type") != "SKILL_LEVEL_UP":
+                continue
+            participant_id = event.get("participantId")
+            skill_slot = event.get("skillSlot")
+            if participant_id is None or skill_slot is None:
+                continue
+            skill_orders.setdefault(participant_id, []).append(skill_slot)
+
+    if not skill_orders:
+        return
+
+    participants = Participant.objects.filter(match__pk=mid, participant_id__in=skill_orders.keys())
+    for participant in participants:
+        participant.skill_order = skill_orders.get(participant.participant_id, [])
+        participant.save(update_fields=["skill_order"])
 
 def insert_deaths(mid: str, timeline: Dict):
     match = Match.objects.get(pk=mid)
@@ -242,6 +337,7 @@ def run_match_import(riot_id: str, region: str):
 
         timeline = get_timeline(mid, region)
         insert_deaths(mid, timeline)
+        insert_skill_orders(mid, timeline)
         time.sleep(DELAY_SEC)
 
     print("✅ Import terminé.")

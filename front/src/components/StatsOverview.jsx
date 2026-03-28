@@ -10,6 +10,35 @@ function buildRankIconUrl(rankTier) {
   return `/api/assets/elo/elo/Rank=${normalizedTier}.png`;
 }
 
+function WinrateChart({ winrate = 0, games = 0 }) {
+  const safeWinrate = Math.max(0, Math.min(100, Number(winrate) || 0));
+
+  return (
+    <div className="winrate-card">
+      <div className="winrate-chart" aria-label={`Winrate ${safeWinrate.toFixed(1)} pourcent`}>
+        <svg viewBox="0 0 36 36" className="circular-chart">
+          <path
+            className="circle-bg"
+            d="M18 2.0845
+              a 15.9155 15.9155 0 0 1 0 31.831
+              a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+          <path
+            className="circle"
+            style={{ strokeDasharray: `${safeWinrate}, 100` }}
+            d="M18 2.0845
+              a 15.9155 15.9155 0 0 1 0 31.831
+              a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+        </svg>
+        <div className="winrate-chart-center">
+          <strong>{Math.round(safeWinrate)}%</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StatsOverview({ stats, query, activeMatch }) {
   const eloLabel = stats?.player_elo || activeMatch?.rank_label || "Elo inconnu";
   const eloIconUrl = stats?.player_elo_icon_url || buildRankIconUrl(activeMatch?.rank_tier);
@@ -29,10 +58,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
       </div>
 
       <div className="profile-highlight">
-        <div>
-          <span>Games</span>
-          <strong>{statValue(stats?.games_analyzed)}</strong>
-        </div>
+        <WinrateChart winrate={stats?.winrate} games={stats?.games_analyzed || 0} />
         <div>
           <span>Temps</span>
           <strong>{statValue(stats?.total_time_played)}</strong>
@@ -41,7 +67,7 @@ export function StatsOverview({ stats, query, activeMatch }) {
 
       {activeMatch ? (
         <div className="focus-card">
-          <p className="eyebrow">Partie sélectionnée</p>
+          <p className="eyebrow">Partie selectionnee</p>
           <div className="focus-title">
             {activeMatch.champion_image_url ? (
               <img className="champion-icon champion-icon-lg" src={activeMatch.champion_image_url} alt={activeMatch.champion} />
@@ -67,14 +93,6 @@ export function StatsOverview({ stats, query, activeMatch }) {
           <span>People met</span>
           <strong>{statValue(stats?.people_met)}</strong>
         </div>
-        {/* <div className="mini-stat">
-          <span>Nouveaux / game</span>
-          <strong>{statValue(stats?.avg_new_people_per_game)}</strong>
-        </div>
-        <div className="mini-stat">
-          <span>Anciennes connaissances</span>
-          <strong>{statValue(stats?.avg_old_friends_per_game)}</strong>
-        </div> */}
       </div>
     </section>
   );

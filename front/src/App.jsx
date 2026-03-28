@@ -3,6 +3,7 @@ import { fetchFrontDashboard, fetchFrontMatches, triggerMatchImport } from "./ap
 import { AppShell } from "./components/AppShell";
 import { SearchPanel } from "./components/SearchPanel";
 import { MatchesTable } from "./components/MatchesTable";
+import { MatchDetailPanel } from "./components/MatchDetailPanel";
 import { StatsOverview } from "./components/StatsOverview";
 import { ChampionStatsTable } from "./components/ChampionStatsTable";
 import { ChartCard } from "./components/ChartCard";
@@ -149,6 +150,7 @@ export function App() {
         <section className="opgg-layout">
           <aside className="left-rail">
             <StatsOverview stats={globalStats} query={query} activeMatch={activeMatch} />
+            <MatchDetailPanel match={activeMatch} />
             <ChartCard
               title="Répartition des parties"
               subtitle="Base locale"

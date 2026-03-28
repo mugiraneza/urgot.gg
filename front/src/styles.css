@@ -303,7 +303,6 @@ input {
 }
 
 .winrate-card {
-  --winrate: 0%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -322,7 +321,7 @@ input {
   justify-content: center;
 }
 
-winrate-card-copy span {
+.winrate-card-copy span {
   color: rgba(255, 215, 186, 0.7);
   font-size: 0.66rem;
   letter-spacing: 0.1em;
@@ -332,7 +331,7 @@ winrate-card-copy span {
 .winrate-card-copy strong {
   margin-top: 2px;
   color: #ffa15b;
-  font-size: 2rem;
+  font-size: 1.4rem;
   line-height: 1;
   font-weight: 800;
 }
@@ -344,23 +343,44 @@ winrate-card-copy span {
   font-weight: 700;
 }
 
-.winrate-card-ring {
-  width: 58px;
-  height: 58px;
-  flex: 0 0 58px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: conic-gradient(#ffa15b var(--winrate), rgba(255, 255, 255, 0.16) 0);
-  transform: rotate(-35deg);
+.winrate-chart {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
 }
 
-.winrate-card-ring-core {
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  background: #31262b;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+.circular-chart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.circle-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2.4;
+}
+
+.circle {
+  fill: none;
+  stroke: #ffa15b;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+}
+
+.winrate-chart-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.winrate-chart-center strong {
+  color: #ffe1bf;
+  font-size: 1rem;
+  font-weight: 800;
 }
 
 .profile-highlight span,
@@ -668,6 +688,76 @@ winrate-card-copy span {
   justify-content: space-between;
 }
 
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.metric-grid,
+.detail-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card,
+.detail-stat-card,
+.detail-block,
+.roster-list li {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.metric-card span,
+.detail-stat-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.metric-card strong,
+.detail-stat-card strong {
+  display: block;
+  margin-top: 6px;
+}
+
+.detail-block h3,
+.team-columns h3 {
+  margin: 0 0 12px;
+}
+
+.detail-copy {
+  display: grid;
+  gap: 8px;
+  color: #d7def0;
+}
+
+.detail-copy p {
+  margin: 0;
+}
+
+.team-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.roster-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.roster-list li {
+  display: grid;
+  gap: 4px;
+}
+
 .alert {
   color: #ffe1e1;
 }
@@ -714,7 +804,8 @@ winrate-card-copy span {
   .search-strip-controls,
   .match-summary,
   .match-expanded,
-  .profile-highlight {
+  .profile-highlight,
+  .team-columns {
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -730,5 +821,10 @@ winrate-card-copy span {
 
   .expanded-player {
     grid-template-columns: 1fr;
+  }
+
+  .metric-grid,
+  .detail-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

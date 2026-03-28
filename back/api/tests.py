@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .models import Champion, Item, Match, Participant
+from .services.riot_importer import insert_participants, insert_skill_orders
 from .views import running_imports
 
 
@@ -271,6 +272,160 @@ class FrontApiViewTests(TestCase):
             "http://testserver/api/assets/items/items/1001.png",
         )
         self.assertEqual(payload["results"][0]["rank_label"], "GOLD II - 47 LP")
+        self.assertIn("advanced_stats", payload["results"][0])
+        self.assertIn("skill_order", payload["results"][0]["advanced_stats"])
         participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in payload["results"][0]["participants"]}
         self.assertEqual(participant_ranks["player#euw"], "GOLD II - 47 LP")
         self.assertEqual(participant_ranks["ally#euw"], "SILVER I - 12 LP")
+
+
+class RiotImporterAdvancedFieldsTests(TestCase):
+    def setUp(self):
+        self.match = Match.objects.create(
+            match_id="EUW1_999",
+            game_creation=1,
+            game_end_ts=2,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=420,
+        )
+
+    @patch("api.services.riot_importer.get_rank_entry_for_puuid", return_value={})
+    def test_insert_participants_stores_advanced_stats_build_and_pings(self, _mock_rank):
+        insert_participants(
+            self.match.match_id,
+            [
+                {
+                    "participantId": 1,
+                    "puuid": "player-1",
+                    "riotIdGameName": "player",
+                    "riotIdTagline": "euw",
+                    "teamId": 100,
+                    "championId": "Urgot",
+                    "championName": "Urgot",
+                    "individualPosition": "TOP",
+                    "role": "SOLO",
+                    "summoner1Id": 4,
+                    "summoner2Id": 12,
+                    "kills": 10,
+                    "deaths": 2,
+                    "assists": 8,
+                    "totalDamageDealtToChampions": 25000,
+                    "damageSelfMitigated": 12000,
+                    "totalHeal": 1000,
+                    "totalDamageShieldedOnTeammates": 2000,
+                    "totalHealsOnTeammates": 1500,
+                    "totalDamageTaken": 18000,
+                    "damageDealtToObjectives": 9000,
+                    "damageDealtToTurrets": 4500,
+                    "largestKillingSpree": 6,
+                    "killingSprees": 3,
+                    "largestMultiKill": 2,
+                    "pentaKills": 0,
+                    "quadraKills": 0,
+                    "turretKills": 2,
+                    "inhibitorKills": 1,
+                    "inhibitorTakedowns": 2,
+                    "turretsLost": 3,
+                    "objectivesStolen": 1,
+                    "objectivesStolenAssists": 1,
+                    "soloKills": 2,
+                    "visionScore": 30,
+                    "wardsPlaced": 12,
+                    "detectorWardsPlaced": 3,
+                    "visionWardsBoughtInGame": 2,
+                    "wardsKilled": 4,
+                    "stealthWardsPlaced": 7,
+                    "totalMinionsKilled": 210,
+                    "neutralMinionsKilled": 12,
+                    "timeCCingOthers": 45,
+                    "item0": 0,
+                    "item1": 0,
+                    "item2": 0,
+                    "item3": 0,
+                    "item4": 0,
+                    "item5": 0,
+                    "item6": 0,
+                    "goldEarned": 15000,
+                    "goldSpent": 14000,
+                    "champLevel": 18,
+                    "champExperience": 18000,
+                    "lane": "TOP",
+                    "championTransform": 0,
+                    "win": True,
+                    "firstBloodKill": False,
+                    "firstTowerKill": True,
+                    "teamPosition": "TOP",
+                    "teamEarlySurrendered": False,
+                    "gameEndedInEarlySurrender": False,
+                    "gameEndedInSurrender": True,
+                    "longestTimeSpentLiving": 800,
+                    "totalTimeCCDealt": 120,
+                    "timePlayed": 1800,
+                    "baitPings": 1,
+                    "dangerPings": 2,
+                    "getBackPings": 3,
+                    "allInPings": 4,
+                    "perks": {
+                        "styles": [
+                            {"style": 8000, "selections": [{"perk": 8010}, {"perk": 9111}]},
+                            {"style": 8400, "selections": [{"perk": 8444}, {"perk": 8451}]},
+                        ],
+                        "statPerks": {"offense": 5005, "flex": 5008, "defense": 5011},
+                    },
+                    "challenges": {
+                        "visionScoreAdvantageLaneOpponent": 1.4,
+                        "laneMinionsFirst10Minutes": 79.5,
+                        "jungleCsBefore10Minutes": 0.0,
+                        "goldPerMinute": 510.2,
+                        "damagePerMinute": 880.4,
+                    },
+                }
+            ],
+        )
+
+        participant = Participant.objects.get(match=self.match, participant_id=1)
+        self.assertEqual(participant.total_damage_shielded_on_teammates, 2000)
+        self.assertEqual(participant.damage_dealt_to_objectives, 9000)
+        self.assertEqual(participant.detector_wards_placed, 3)
+        self.assertEqual(participant.vision_score_advantage_lane_opponent, 1.4)
+        self.assertEqual(participant.lane, "TOP")
+        self.assertEqual(participant.gold_per_minute, 510.2)
+        self.assertEqual(participant.game_ended_in_surrender, True)
+        self.assertEqual(participant.bait_pings, 1)
+        self.assertEqual(participant.ping_stats["allInPings"], 4)
+        self.assertEqual(participant.primary_rune_style, 8000)
+        self.assertEqual(participant.secondary_rune_style, 8400)
+        self.assertEqual(participant.primary_rune_selections, [8010, 9111])
+        self.assertEqual(participant.secondary_rune_selections, [8444, 8451])
+        self.assertEqual(participant.stat_perks["offense"], 5005)
+
+    def test_insert_skill_orders_stores_timeline_progression(self):
+        Participant.objects.create(
+            match=self.match,
+            participant_id=1,
+            **participant_defaults(),
+        )
+
+        insert_skill_orders(
+            self.match.match_id,
+            {
+                "info": {
+                    "frames": [
+                        {
+                            "events": [
+                                {"type": "SKILL_LEVEL_UP", "participantId": 1, "skillSlot": 1},
+                                {"type": "SKILL_LEVEL_UP", "participantId": 1, "skillSlot": 3},
+                                {"type": "SKILL_LEVEL_UP", "participantId": 1, "skillSlot": 1},
+                            ]
+                        }
+                    ]
+                }
+            },
+        )
+
+        participant = Participant.objects.get(match=self.match, participant_id=1)
+        self.assertEqual(participant.skill_order, [1, 3, 1])
