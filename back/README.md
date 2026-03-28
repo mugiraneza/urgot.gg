@@ -65,7 +65,7 @@ def setEnv():
     os.environ['POSTGRES_PORT']='5432'
 
     # Django
-    os.environ['DJANGO_SECRET_KEY']="j|X@C:hN$VuBzSMf|@ibw$WXO|U$hgtceIZKINr73KRacZ20wgen.R"
+    os.environ['DJANGO_SECRET_KEY']="j|X@C:hN$xxxxxxxxxxxxxx|@ibw$WXO|U$wxxxxxxxxxxxxxxxxxxxxxx.R"
     os.environ['DJANGO_DEBUG']='True'
     os.environ['DJANGO_ALLOWED_HOSTS']='localhost,127.0.0.1'
 
