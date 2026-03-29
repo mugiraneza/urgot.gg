@@ -107,7 +107,7 @@ export function MatchesTable({
               return (
                 <article
                   key={match.match_id}
-                  className={`match-card ${match.win ? "is-win" : "is-loss"} ${isSelected ? "is-selected" : ""}`}
+                  className={`match-card ${ match.advanced_stats.game_ended_in_early_surrender ? "surrender": (match.win ? "is-win" : "is-loss")} ${isSelected ? "is-selected" : ""}  `}
                   onClick={() => onSelectMatch(match)}
                 >
                   <div className="match-summary">
