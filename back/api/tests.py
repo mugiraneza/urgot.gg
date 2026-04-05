@@ -288,6 +288,51 @@ class FrontApiViewTests(TestCase):
         self.assertIn("cs_evolution", payload)
         self.assertEqual(payload["lp_evolution"][0]["lp"], 47)
 
+    def test_front_dashboard_includes_solo_and_flex_ranks(self):
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_SOLO_5x5",
+            tier="GOLD",
+            rank_division="II",
+            league_points=47,
+            wins=12,
+            losses=9,
+        )
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_FLEX_SR",
+            tier="PLATINUM",
+            rank_division="IV",
+            league_points=23,
+            wins=8,
+            losses=7,
+        )
+
+        response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        ranks = response.json()["overview"]["player_ranks"]
+        self.assertEqual(ranks["solo"]["label"], "GOLD II - 47 LP")
+        self.assertEqual(ranks["solo"]["tier"], "GOLD")
+        self.assertEqual(ranks["flex"]["label"], "PLATINUM IV - 23 LP")
+        self.assertEqual(ranks["flex"]["tier"], "PLATINUM")
+
+    @patch("api.views.build_profile_icon_url", return_value="https://ddragon.leagueoflegends.com/cdn/15.1.1/img/profileicon/1234.png")
+    @patch("api.views.get_summoner_profile_by_puuid", return_value={"profileIconId": 1234})
+    def test_front_dashboard_includes_profile_icon_url(self, get_summoner_profile_mock, _build_profile_icon_url_mock):
+        response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["overview"]["player_profile_icon_url"],
+            "https://ddragon.leagueoflegends.com/cdn/15.1.1/img/profileicon/1234.png",
+        )
+        get_summoner_profile_mock.assert_called_once_with("player-1", "euw1")
+
     def test_front_matches_reads_local_db(self):
         response = self.client.get(reverse("front-matches"), {"riot_name": "player#euw"})
 

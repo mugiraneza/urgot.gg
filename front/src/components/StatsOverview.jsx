@@ -10,6 +10,17 @@ function buildRankIconUrl(rankTier) {
   return `/api/assets/elo/elo/Rank=${normalizedTier}.png`;
 }
 
+function buildQueueRank(label, fallbackTier) {
+  if (!label && !fallbackTier) {
+    return null;
+  }
+
+  return {
+    label: label || fallbackTier || "Non classe",
+    icon_url: fallbackTier ? buildRankIconUrl(fallbackTier) : null,
+  };
+}
+
 function WinrateChart({ winrate = 0 }) {
   const safeWinrate = Math.max(0, Math.min(100, Number(winrate) || 0));
 
@@ -42,21 +53,59 @@ function WinrateChart({ winrate = 0 }) {
 export function StatsOverview({ stats, query, activeMatch }) {
   const eloLabel = stats?.player_elo || activeMatch?.rank_label || "Elo inconnu";
   const eloIconUrl = stats?.player_elo_icon_url || buildRankIconUrl(activeMatch?.rank_tier);
+  const profileIconUrl = stats?.player_profile_icon_url || null;
+  const playerLabel = query.value || "Joueur local";
+  const soloRank =
+    stats?.player_ranks?.solo ||
+    buildQueueRank(
+      activeMatch?.rank_queue === "RANKED_SOLO_5x5" ? activeMatch?.rank_label : null,
+      activeMatch?.rank_queue === "RANKED_SOLO_5x5" ? activeMatch?.rank_tier : null,
+    );
+  const flexRank =
+    stats?.player_ranks?.flex ||
+    buildQueueRank(
+      activeMatch?.rank_queue === "RANKED_FLEX_SR" ? activeMatch?.rank_label : null,
+      activeMatch?.rank_queue === "RANKED_FLEX_SR" ? activeMatch?.rank_tier : null,
+    );
 
   return (
     <section className="profile-card">
       <div className="profile-header">
-        <div className="avatar-ring">{(query.value || "U").slice(0, 2).toUpperCase()}</div>
+        <div className="avatar-ring">
+          {profileIconUrl ? (
+            <img className="profile-icon" src={profileIconUrl} alt={`Icone de profil de ${playerLabel}`} />
+          ) : (
+            (query.value || "U").slice(0, 2).toUpperCase()
+          )}
+        </div>
         <div>
           <p className="eyebrow">Profil</p>
-          <h3>{query.value || "Joueur local"}</h3>
+          <h3>{playerLabel} </h3>
+          <em>{statValue(stats?.total_time_played)}</em>
           <div className="profile-rank-row">
             {eloIconUrl ? <img className="rank-emblem" src={eloIconUrl} alt={eloLabel} /> : null}
             <p className="muted">{eloLabel}</p>
           </div>
         </div>
       </div>
-
+      <div className="prodile-card">
+        <div className="queue-rank-list">
+          <div className="queue-rank-item">
+            <span className="queue-rank-label">Solo/Duo</span>
+            <div className="queue-rank-value">
+              {soloRank?.icon_url ? <img className="queue-rank-icon" src={soloRank.icon_url} alt={soloRank.label} /> : null}
+              {/* <span>{soloRank?.label || "Non classe"}</span> */}
+            </div>
+          </div>
+          <div className="queue-rank-item">
+            <span className="queue-rank-label">Flex</span>
+            <div className="queue-rank-value">
+              {flexRank?.icon_url ? <img className="queue-rank-icon" src={flexRank.icon_url} alt={flexRank.label} /> : null}
+              {/* <span>{flexRank?.label || "Non classe"}</span> */}
+            </div>
+          </div>
+        </div>
+      </div>
       <div className="profile-highlight">
         <WinrateChart winrate={stats?.winrate} />
         <div>

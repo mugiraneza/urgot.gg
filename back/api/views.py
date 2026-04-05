@@ -1,5 +1,10 @@
 # Create your views here.
-from .services.riot_importer import run_match_import 
+from .services.riot_importer import (
+    build_profile_icon_url,
+    get_platform_region,
+    get_summoner_profile_by_puuid,
+    run_match_import,
+)
 from .services.import_champions_items import RiotDataImporter
 from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
 from .models import *
@@ -136,6 +141,84 @@ def _build_rank_icon_name(rank_tier):
         return None
     normalized_tier = rank_tier.strip().title()
     return f"Rank={normalized_tier}"
+
+
+def _build_player_profile_icon_url(participant):
+    if not participant:
+        return None
+
+    platform_region = get_platform_region(participant.match.match_id)
+    summoner_profile = get_summoner_profile_by_puuid(participant.puuid, platform_region)
+    profile_icon_id = summoner_profile.get("profileIconId")
+    return build_profile_icon_url(profile_icon_id)
+
+
+def _build_rank_summary(request, tier, rank_division, league_points):
+    if not tier:
+        return None
+
+    participant = type(
+        "RankSummary",
+        (),
+        {"rank_tier": tier, "rank_division": rank_division, "rank_lp": league_points},
+    )()
+    return {
+        "label": _format_rank_label(participant),
+        "tier": tier,
+        "rank_division": rank_division,
+        "lp": league_points,
+        "icon_url": _build_asset_url(request, "elo", _build_rank_icon_name(tier)),
+    }
+
+
+def _build_player_rank_overview(request, filters, latest_ranked_participant):
+    snapshot_filters = {}
+    if filters.get("puuid"):
+        snapshot_filters["puuid"] = filters["puuid"]
+    if filters.get("riot_name__iexact"):
+        snapshot_filters["riot_name__iexact"] = filters["riot_name__iexact"]
+
+    latest_snapshots = {}
+    for snapshot in (
+        RankSnapshot.objects.filter(**snapshot_filters)
+        .select_related("match")
+        .order_by("queue_type", "-match__game_creation", "-captured_at")
+    ):
+        latest_snapshots.setdefault(snapshot.queue_type, snapshot)
+
+    solo_snapshot = latest_snapshots.get("RANKED_SOLO_5x5")
+    flex_snapshot = latest_snapshots.get("RANKED_FLEX_SR")
+
+    if solo_snapshot or flex_snapshot:
+        return {
+            "solo": _build_rank_summary(
+                request,
+                solo_snapshot.tier if solo_snapshot else None,
+                solo_snapshot.rank_division if solo_snapshot else None,
+                solo_snapshot.league_points if solo_snapshot else None,
+            ),
+            "flex": _build_rank_summary(
+                request,
+                flex_snapshot.tier if flex_snapshot else None,
+                flex_snapshot.rank_division if flex_snapshot else None,
+                flex_snapshot.league_points if flex_snapshot else None,
+            ),
+        }
+
+    return {
+        "solo": _build_rank_summary(
+            request,
+            latest_ranked_participant.rank_tier if latest_ranked_participant and latest_ranked_participant.rank_queue == "RANKED_SOLO_5x5" else None,
+            latest_ranked_participant.rank_division if latest_ranked_participant and latest_ranked_participant.rank_queue == "RANKED_SOLO_5x5" else None,
+            latest_ranked_participant.rank_lp if latest_ranked_participant and latest_ranked_participant.rank_queue == "RANKED_SOLO_5x5" else None,
+        ),
+        "flex": _build_rank_summary(
+            request,
+            latest_ranked_participant.rank_tier if latest_ranked_participant and latest_ranked_participant.rank_queue == "RANKED_FLEX_SR" else None,
+            latest_ranked_participant.rank_division if latest_ranked_participant and latest_ranked_participant.rank_queue == "RANKED_FLEX_SR" else None,
+            latest_ranked_participant.rank_lp if latest_ranked_participant and latest_ranked_participant.rank_queue == "RANKED_FLEX_SR" else None,
+        ),
+    }
 
 
 def _serialize_participant_details(request, participant):
@@ -367,6 +450,8 @@ def _build_global_overview(request, filters):
         (participant for participant in reversed(participants) if participant.rank_tier),
         None,
     )
+    latest_participant = participants[-1]
+    player_rank_overview = _build_player_rank_overview(request, filters, latest_ranked_participant)
     first_match = datetime.utcfromtimestamp(participants[0].match.game_creation // 1000)
     last_match = datetime.utcfromtimestamp(participants[-1].match.game_end_ts // 1000)
     total_time_played_sec = sum(participant.time_played for participant in participants)
@@ -418,6 +503,8 @@ def _build_global_overview(request, filters):
         "winrate": round((total_wins / total_games) * 100, 1) if total_games else 0,
         "player_elo": _format_rank_label(latest_ranked_participant) if latest_ranked_participant else None,
         "player_elo_icon_url": _build_asset_url(request, "elo", _build_rank_icon_name(latest_ranked_participant.rank_tier)) if latest_ranked_participant else None,
+        "player_profile_icon_url": _build_player_profile_icon_url(latest_participant),
+        "player_ranks": player_rank_overview,
         "oldest_match": first_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "most_recent_match": last_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "total_time_played": format_duration(total_time_played_sec),

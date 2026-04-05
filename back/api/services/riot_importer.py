@@ -1,15 +1,20 @@
 import os
 import time
 import requests
-from typing import Dict, List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional, Tuple
 from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
 
 RIOT_API_KEY = os.getenv("RIOT_KEY")
 MAX_MATCHES = int(1000)
 DELAY_SEC = float(1.3)
+IMPORT_WORKERS = max(1, int(os.getenv("RIOT_IMPORT_WORKERS", "4")))
 HEADERS = {"X-Riot-Token": RIOT_API_KEY}
 RANKED_QUEUE_PRIORITY = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR"]
 RANK_CACHE: Dict[str, Dict] = {}
+SUMMONER_CACHE: Dict[str, Dict] = {}
+DATA_DRAGON_BASE_URL = "https://ddragon.leagueoflegends.com"
+DATA_DRAGON_VERSION: Optional[str] = None
 
 def _get_json(url: str) -> Dict:
     while True:
@@ -71,6 +76,10 @@ def get_timeline(mid: str, region: str) -> Dict:
     return _get_json(f"https://{region}.api.riotgames.com/lol/match/v5/matches/{mid}/timeline")
 
 
+def fetch_match_bundle(mid: str, region: str) -> Tuple[str, Dict, Dict]:
+    return mid, get_match(mid, region), get_timeline(mid, region)
+
+
 def get_platform_region(match_id: str) -> str:
     return match_id.split("_", 1)[0].lower()
 
@@ -95,6 +104,54 @@ def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
 
     RANK_CACHE[cache_key] = entries[0] if entries else {}
     return RANK_CACHE[cache_key]
+
+
+def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
+    if not RIOT_API_KEY or not puuid or not platform_region:
+        return {}
+
+    cache_key = f"{platform_region}:{puuid}"
+    if cache_key in SUMMONER_CACHE:
+        return SUMMONER_CACHE[cache_key]
+
+    try:
+        data = _get_json(
+            f"https://{platform_region}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{puuid}"
+        )
+    except requests.RequestException:
+        data = {}
+
+    SUMMONER_CACHE[cache_key] = data if isinstance(data, dict) else {}
+    return SUMMONER_CACHE[cache_key]
+
+
+def get_latest_data_dragon_version() -> Optional[str]:
+    global DATA_DRAGON_VERSION
+
+    if DATA_DRAGON_VERSION:
+        return DATA_DRAGON_VERSION
+
+    try:
+        response = requests.get(f"{DATA_DRAGON_BASE_URL}/api/versions.json", timeout=10)
+        response.raise_for_status()
+        versions = response.json()
+    except requests.RequestException:
+        return None
+
+    if isinstance(versions, list) and versions:
+        DATA_DRAGON_VERSION = versions[0]
+    return DATA_DRAGON_VERSION
+
+
+def build_profile_icon_url(profile_icon_id: Optional[int]) -> Optional[str]:
+    if profile_icon_id is None:
+        return None
+
+    version = get_latest_data_dragon_version()
+    if not version:
+        return None
+
+    return f"{DATA_DRAGON_BASE_URL}/cdn/{version}/img/profileicon/{profile_icon_id}.png"
 
 
 def store_rank_snapshot(match_id: str, puuid: str, riot_name: str) -> None:
@@ -347,20 +404,36 @@ def run_match_import(riot_id: str, region: str):
     all_ids = get_all_match_ids(puuid, region, MAX_MATCHES)
     to_do = [mid for mid in all_ids if mid not in existing]
 
-    print(f"[i] {len(existing)} match(s) dÃ©jÃ  en base")
-    print(f"[i] {len(to_do)} match(s) Ã  importer")
+    print(f"[i] {len(existing)} match(s) déjà en base")
+    print(f"[i] {len(to_do)} match(s) à importer")
 
-    for i, mid in enumerate(to_do, 1):
-        print(f"[{i}/{len(to_do)}] Import {mid}")
-        match_data = get_match(mid, region)
-        insert_match(match_data["info"], mid,match_data)
-        insert_teams(mid, match_data["info"]["teams"])
-        insert_participants(mid, match_data["info"]["participants"])
+    if IMPORT_WORKERS <= 1:
+        for i, mid in enumerate(to_do, 1):
+            print(f"[{i}/{len(to_do)}] Import {mid}")
+            match_data = get_match(mid, region)
+            insert_match(match_data["info"], mid, match_data)
+            insert_teams(mid, match_data["info"]["teams"])
+            insert_participants(mid, match_data["info"]["participants"])
 
-        timeline = get_timeline(mid, region)
-        insert_deaths(mid, timeline)
-        insert_skill_orders(mid, timeline)
-        time.sleep(DELAY_SEC)
+            timeline = get_timeline(mid, region)
+            insert_deaths(mid, timeline)
+            insert_skill_orders(mid, timeline)
+            time.sleep(DELAY_SEC)
+    else:
+        print(f"[i] Telechargement parallele active: {IMPORT_WORKERS} workers")
+        with ThreadPoolExecutor(max_workers=IMPORT_WORKERS) as executor:
+            future_map = {
+                executor.submit(fetch_match_bundle, mid, region): mid
+                for mid in to_do
+            }
+            for i, future in enumerate(as_completed(future_map), 1):
+                mid, match_data, timeline = future.result()
+                print(f"[{i}/{len(to_do)}] Import {mid}")
+                insert_match(match_data["info"], mid, match_data)
+                insert_teams(mid, match_data["info"]["teams"])
+                insert_participants(mid, match_data["info"]["participants"])
+                insert_deaths(mid, timeline)
+                insert_skill_orders(mid, timeline)
 
 
     if to_do:
