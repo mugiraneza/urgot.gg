@@ -259,7 +259,7 @@ export function App() {
                     data: lpEvolution.map((entry) => entry.elo_score ?? entry.lp),
                     hoverLabels: lpEvolution.map((entry) => entry.rank_label || `${entry.tier || ""} ${entry.rank_division || ""} - ${entry.lp} LP`.trim()),
                     borderColor: "#5377d8",
-                    backgroundColor: "#eafcff",
+                    backgroundColor: "rgba(83,119,216,0.16)",
                     borderWidth: 2,
                     tension: 0.3,
                     fill: true,
