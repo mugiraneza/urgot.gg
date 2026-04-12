@@ -246,6 +246,27 @@ export function App() {
         <section className="opgg-layout">
           <aside className="left-rail">
             <StatsOverview stats={globalStats} query={query} activeMatch={activeMatch} />
+            <ChartCard
+              title="Évolution LP"
+              subtitle="Snapshots classés"
+              type="line"
+              variant="ranked"
+              data={{
+                labels: lpEvolution.map((entry) => entry.date.slice(5, 16)),
+                datasets: [
+                  {
+                    label: "Elo",
+                    data: lpEvolution.map((entry) => entry.elo_score ?? entry.lp),
+                    hoverLabels: lpEvolution.map((entry) => entry.rank_label || `${entry.tier || ""} ${entry.rank_division || ""} - ${entry.lp} LP`.trim()),
+                    borderColor: "#5377d8",
+                    backgroundColor: "#eafcff",
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true,
+                  },
+                ],
+              }}
+            />
             <MatchDetailPanel match={activeMatch} />
             <ChartCard
               title="Répartition des parties"
@@ -264,25 +285,6 @@ export function App() {
               }}
             />
             <ChampionStatsTable rows={championStats.slice(0, 8)} />
-            <ChartCard
-              title="Évolution LP"
-              subtitle="Snapshots classés"
-              type="line"
-              data={{
-                labels: lpEvolution.map((entry) => entry.date.slice(5, 16)),
-                datasets: [
-                  {
-                    label: "LP",
-                    data: lpEvolution.map((entry) => entry.lp),
-                    borderColor: "#5377d8",
-                    backgroundColor: "rgba(83,119,216,0.16)",
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: true,
-                  },
-                ],
-              }}
-            />
             <ChartCard
               title="CS / min"
               subtitle="Tendance récente"

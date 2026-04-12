@@ -292,6 +292,8 @@ class FrontApiViewTests(TestCase):
         self.assertIn("modes", payload)
         self.assertIn("cs_evolution", payload)
         self.assertEqual(payload["lp_evolution"][0]["lp"], 47)
+        self.assertEqual(payload["lp_evolution"][0]["elo_score"], 1447)
+        self.assertEqual(payload["lp_evolution"][0]["rank_label"], "GOLD II - 47 LP")
 
     def test_front_dashboard_includes_solo_and_flex_ranks(self):
         RankSnapshot.objects.create(
@@ -325,6 +327,53 @@ class FrontApiViewTests(TestCase):
         self.assertEqual(ranks["solo"]["tier"], "GOLD")
         self.assertEqual(ranks["flex"]["label"], "PLATINUM IV - 23 LP")
         self.assertEqual(ranks["flex"]["tier"], "PLATINUM")
+
+    def test_front_dashboard_lp_evolution_uses_rank_score_and_prefers_solo_queue(self):
+        later_match = Match.objects.create(
+            match_id="EUW1_5",
+            game_creation=self.match.game_creation + 1000,
+            game_end_ts=self.match.game_end_ts + 1000,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=420,
+        )
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_SOLO_5x5",
+            tier="GOLD",
+            rank_division="I",
+            league_points=90,
+        )
+        RankSnapshot.objects.create(
+            match=later_match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_SOLO_5x5",
+            tier="PLATINUM",
+            rank_division="IV",
+            league_points=10,
+        )
+        RankSnapshot.objects.create(
+            match=later_match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_FLEX_SR",
+            tier="SILVER",
+            rank_division="II",
+            league_points=80,
+        )
+
+        response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        evolution = response.json()["lp_evolution"]
+        self.assertEqual([entry["queue_type"] for entry in evolution], ["RANKED_SOLO_5x5", "RANKED_SOLO_5x5"])
+        self.assertEqual([entry["elo_score"] for entry in evolution], [1590, 1610])
 
     @patch("api.views.build_profile_icon_url", return_value="https://ddragon.leagueoflegends.com/cdn/15.1.1/img/profileicon/1234.png")
     @patch("api.views.get_summoner_profile_by_puuid", return_value={"profileIconId": 1234})

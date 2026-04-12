@@ -690,6 +690,26 @@ button {
   min-height: 270px;
 }
 
+.chart-card-line {
+  background: linear-gradient(145deg, #202437, #161b2c);
+  border-color: rgba(126, 218, 255, 0.14);
+  box-shadow:
+    0 18px 34px rgba(21, 28, 46, 0.24),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.chart-card-line .section-header {
+  margin-bottom: 10px;
+}
+
+.chart-card-line .eyebrow {
+  color: #ffd45d;
+}
+
+.chart-card-line h3 {
+  color: #f4f8ff;
+}
+
 .chart-frame {
   position: relative;
   min-height: 310px;
@@ -697,6 +717,23 @@ button {
   border-radius: 20px;
   background: linear-gradient(145deg, #dde6ef, #edf3f8);
   box-shadow: var(--shadow-inset-soft);
+}
+
+.chart-card-line .chart-frame {
+  min-height: 210px;
+  padding: 4px 0 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 52% 18%, rgba(111, 244, 181, 0.12), transparent 18%),
+    linear-gradient(180deg, #24283f 0%, #21253b 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 -22px 46px rgba(9, 13, 24, 0.24);
+}
+
+.chart-card-line canvas {
+  display: block;
 }
 
 .feed-card {

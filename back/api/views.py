@@ -72,6 +72,24 @@ QUEUE_NAMES = {
     2010: "Tutorial 2",
     2020: "Tutorial 3",
 }
+RANK_TIER_SCORES = {
+    "IRON": 0,
+    "BRONZE": 400,
+    "SILVER": 800,
+    "GOLD": 1200,
+    "PLATINUM": 1600,
+    "EMERALD": 2000,
+    "DIAMOND": 2400,
+    "MASTER": 2800,
+    "GRANDMASTER": 3200,
+    "CHALLENGER": 3600,
+}
+RANK_DIVISION_SCORES = {
+    "IV": 0,
+    "III": 100,
+    "II": 200,
+    "I": 300,
+}
 
 #EndOfRegion Variable Global
 
@@ -171,6 +189,35 @@ def _build_rank_summary(request, tier, rank_division, league_points):
         "lp": league_points,
         "icon_url": _build_asset_url(request, "elo", _build_rank_icon_name(tier)),
     }
+
+
+def _build_rank_label(tier, rank_division, league_points):
+    if not tier:
+        return None
+
+    parts = [tier]
+    if rank_division:
+        parts.append(rank_division)
+
+    label = " ".join(parts)
+    if league_points is not None:
+        label = f"{label} - {league_points} LP"
+    return label
+
+
+def _build_rank_elo_score(tier, rank_division, league_points):
+    normalized_tier = (tier or "").strip().upper()
+    if normalized_tier not in RANK_TIER_SCORES:
+        return league_points
+
+    base_score = RANK_TIER_SCORES[normalized_tier]
+    lp_score = league_points or 0
+
+    if normalized_tier in {"MASTER", "GRANDMASTER", "CHALLENGER"}:
+        return base_score + lp_score
+
+    normalized_division = (rank_division or "").strip().upper()
+    return base_score + RANK_DIVISION_SCORES.get(normalized_division, 0) + lp_score
 
 
 def _build_player_rank_overview(request, filters, latest_ranked_participant):
@@ -603,23 +650,41 @@ def _build_lp_evolution(filters):
     if filters.get("riot_name__iexact"):
         snapshot_filters["riot_name__iexact"] = filters["riot_name__iexact"]
 
-    snapshots = RankSnapshot.objects.filter(**snapshot_filters).select_related("match").order_by("match__game_creation", "captured_at")
-    if not snapshots.exists():
+    snapshots = list(
+        RankSnapshot.objects.filter(**snapshot_filters)
+        .select_related("match")
+        .order_by("match__game_creation", "captured_at")
+    )
+    if not snapshots:
         return []
+
+    ranked_snapshots = [snapshot for snapshot in snapshots if snapshot.league_points is not None and snapshot.tier]
+    if not ranked_snapshots:
+        return []
+
+    queue_types = {snapshot.queue_type for snapshot in ranked_snapshots}
+    if "RANKED_SOLO_5x5" in queue_types:
+        selected_queue_type = "RANKED_SOLO_5x5"
+    elif "RANKED_FLEX_SR" in queue_types:
+        selected_queue_type = "RANKED_FLEX_SR"
+    else:
+        selected_queue_type = ranked_snapshots[-1].queue_type
 
     return [
         {
             "match_id": snapshot.match.match_id,
             "date": datetime.fromtimestamp(snapshot.match.game_end_ts / 1000).strftime("%Y-%m-%d %H:%M"),
             "lp": snapshot.league_points,
+            "elo_score": _build_rank_elo_score(snapshot.tier, snapshot.rank_division, snapshot.league_points),
+            "rank_label": _build_rank_label(snapshot.tier, snapshot.rank_division, snapshot.league_points),
             "tier": snapshot.tier,
             "rank_division": snapshot.rank_division,
             "queue_type": snapshot.queue_type,
             "wins": snapshot.wins,
             "losses": snapshot.losses,
         }
-        for snapshot in snapshots
-        if snapshot.league_points is not None
+        for snapshot in ranked_snapshots
+        if snapshot.queue_type == selected_queue_type
     ]
 
 class MatchViewSet(viewsets.ModelViewSet):
