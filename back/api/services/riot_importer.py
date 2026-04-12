@@ -2,7 +2,8 @@ import os
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from django.db import transaction
 from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
 
 RIOT_API_KEY = os.getenv("RIOT_KEY")
@@ -311,6 +312,24 @@ def insert_match(info: Dict, mid: str, obj:Dict):
         },
     )
 
+
+def upsert_match(info: Dict, mid: str, obj: Dict):
+    Match.objects.update_or_create(
+        match_id=mid,
+        defaults={
+            "game_creation": info["gameCreation"],
+            "game_end_ts": info["gameEndTimestamp"],
+            "game_duration": info["gameDuration"],
+            "game_mode": info["gameMode"],
+            "game_type": info["gameType"],
+            "game_version": info["gameVersion"],
+            "map_id": info["mapId"],
+            "queue_id": info["queueId"],
+            "tournament_code": info.get("tournamentCode"),
+            "objet_complet": obj,
+        },
+    )
+
 def insert_teams(mid: str, teams: List[Dict]):
     match = Match.objects.get(pk=mid)
     for t in teams:
@@ -394,6 +413,122 @@ def insert_deaths(mid: str, timeline: Dict):
                     },
                 )
 
+
+def _expected_import_counts(stored_match: Dict[str, Any]) -> Dict[str, int]:
+    info = stored_match.get("info") or {}
+    teams = info.get("teams") or []
+    return {
+        "participants": len(info.get("participants") or []),
+        "teams": len(teams),
+        "bans": sum(len(team.get("bans") or []) for team in teams),
+        "objectives": sum(len((team.get("objectives") or {}).keys()) for team in teams),
+    }
+
+
+def _actual_import_counts(match: Match) -> Dict[str, int]:
+    return {
+        "participants": Participant.objects.filter(match=match).count(),
+        "teams": Team.objects.filter(match=match).count(),
+        "bans": Ban.objects.filter(match=match).count(),
+        "objectives": Objective.objects.filter(match=match).count(),
+    }
+
+
+def is_match_import_incomplete(match: Match) -> bool:
+    stored_match = match.objet_complet or {}
+    if not stored_match.get("info"):
+        return False
+
+    expected = _expected_import_counts(stored_match)
+    actual = _actual_import_counts(match)
+    return any(actual[key] < expected[key] for key in expected)
+
+
+@transaction.atomic
+def repair_match_import_from_stored_object(match: Match) -> Dict[str, Any]:
+    stored_match = match.objet_complet or {}
+    info = stored_match.get("info") or {}
+    participants = info.get("participants") or []
+    teams = info.get("teams") or []
+
+    if not info or not participants:
+        return {
+            "match_id": match.match_id,
+            "status": "skipped",
+            "reason": "missing_stored_match_info",
+        }
+
+    before = _actual_import_counts(match)
+
+    upsert_match(info, match.match_id, stored_match)
+    insert_teams(match.match_id, teams)
+    insert_participants(match.match_id, participants)
+
+    after = _actual_import_counts(Match.objects.get(pk=match.match_id))
+    repaired = any(after[key] > before[key] for key in before)
+
+    return {
+        "match_id": match.match_id,
+        "status": "repaired" if repaired else "ok",
+        "before": before,
+        "after": after,
+    }
+
+
+def repair_incomplete_match_imports(match_id: Optional[str] = None) -> Dict[str, Any]:
+    queryset = Match.objects.all().order_by("match_id")
+    if match_id:
+        queryset = queryset.filter(match_id=match_id)
+
+    summary = {
+        "checked": 0,
+        "repaired": 0,
+        "ok": 0,
+        "skipped": 0,
+        "details": [],
+    }
+
+    for match in queryset:
+        summary["checked"] += 1
+        stored_match = match.objet_complet or {}
+        if not stored_match.get("info"):
+            summary["skipped"] += 1
+            summary["details"].append(
+                {
+                    "match_id": match.match_id,
+                    "status": "skipped",
+                    "reason": "missing_stored_match_info",
+                }
+            )
+            continue
+
+        if not is_match_import_incomplete(match):
+            summary["ok"] += 1
+            summary["details"].append(
+                {
+                    "match_id": match.match_id,
+                    "status": "ok",
+                }
+            )
+            continue
+
+        result = repair_match_import_from_stored_object(match)
+        summary["details"].append(result)
+        if result["status"] == "repaired":
+            summary["repaired"] += 1
+        elif result["status"] == "ok":
+            summary["ok"] += 1
+        else:
+            summary["skipped"] += 1
+
+    return summary
+                
+def run_find_puid(riot_id: str, region: str):
+    if not RIOT_API_KEY:
+        raise RuntimeError("RIOT_API_KEY manquante.")
+    name, tag = split_riot_id(riot_id)
+    return get_puuid(name, tag, region)
+
 def run_match_import(riot_id: str, region: str):
     if not RIOT_API_KEY:
         raise RuntimeError("RIOT_API_KEY manquante.")
@@ -403,7 +538,7 @@ def run_match_import(riot_id: str, region: str):
     existing = set(Match.objects.values_list("match_id", flat=True))
     all_ids = get_all_match_ids(puuid, region, MAX_MATCHES)
     to_do = [mid for mid in all_ids if mid not in existing]
-
+    print(riot_id)
     print(f"[i] {len(existing)} match(s) déjà en base")
     print(f"[i] {len(to_do)} match(s) à importer")
 
@@ -440,4 +575,4 @@ def run_match_import(riot_id: str, region: str):
         # Riot ne fournit pas le LP gagne/perdu dans les donnees de match.
         # On capture l'etat classe courant et on l'associe au match le plus recent importe.
         store_rank_snapshot(to_do[0], puuid, riot_id)
-    print("âœ… Import terminÃ©.")
+    print("..... Import terminé.")

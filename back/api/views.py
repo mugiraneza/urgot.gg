@@ -3,7 +3,9 @@ from .services.riot_importer import (
     build_profile_icon_url,
     get_platform_region,
     get_summoner_profile_by_puuid,
+    repair_incomplete_match_imports,
     run_match_import,
+    run_find_puid
 )
 from .services.import_champions_items import RiotDataImporter
 from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
@@ -827,6 +829,36 @@ class ImportStatusView(views.APIView):
         else:
             return Response({"status": "terminé ou inconnu"}, status=200)
 
+class RepairStoredImportsView(views.APIView):
+    """
+    Verifie les imports incomplets et les complete depuis Match.objet_complet.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Verifie les imports incomplets et les complete depuis la colonne objet_complet.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "match_id": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Optionnel: reparer un match precis.",
+                ),
+            },
+        ),
+        responses={
+            200: openapi.Response(description="Verification terminee."),
+            500: openapi.Response(description="Erreur serveur."),
+        }
+    )
+    def post(self, request, **kwargs):
+        try:
+            match_id = request.data.get("match_id")
+            result = repair_incomplete_match_imports(match_id=match_id)
+            return Response(result, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class MatchcountViewSet(views.APIView):
     """
     Retourne le nombre total de matchs enregistrés en base.
@@ -1588,6 +1620,31 @@ class GameDurationOutcomeDistributionView(views.APIView):
 
         return Response(result)
     
+class FindPuidView(views.APIView):
+    @swagger_auto_schema(
+        operation_description="Récupérer le puid a partir du summoner name",
+        manual_parameters=[
+            openapi.Parameter( 'riot_id', openapi.IN_QUERY, description="riot_id", type=openapi.TYPE_STRING ),
+            openapi.Parameter( 'region', openapi.IN_QUERY, description="region", type=openapi.TYPE_STRING ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="user puid",
+                examples={"application/json": {"riot_id": 'ilanizer123#EUW'}}
+            )
+        }
+    )
+    def get(self, request):
+        try:
+            riot_id = request.GET.get("riot_id")
+            region = request.GET.get("region")
+            print(riot_id)
+            if not riot_id :
+                return Response({"status": "veuillez rajouter riot_id dans le GET"}, status=200)
+            resultat = run_find_puid(riot_id,region)
+            return Response({"puid":  resultat}, status=200)
+        except:
+            return Response({"status": "une erreur a eu lieu"}, status=404)
 class FindNewUsernameView(views.APIView):
     @swagger_auto_schema(
         operation_description="Récupérer le nouveau summoner name",

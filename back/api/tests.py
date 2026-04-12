@@ -7,8 +7,13 @@ from django.utils import timezone
 from django.core.cache import cache
 from rest_framework.test import APIClient
 
-from .models import Champion, Item, Match, Participant, RankSnapshot
-from .services.riot_importer import insert_participants, insert_skill_orders, store_rank_snapshot
+from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnapshot, Team
+from .services.riot_importer import (
+    insert_participants,
+    insert_skill_orders,
+    repair_incomplete_match_imports,
+    store_rank_snapshot,
+)
 from .views import running_imports
 
 
@@ -537,3 +542,171 @@ class RiotImporterAdvancedFieldsTests(TestCase):
         self.assertEqual(snapshot.tier, "PLATINUM")
         self.assertEqual(snapshot.rank_division, "IV")
         self.assertEqual(snapshot.league_points, 23)
+
+
+class RepairStoredImportsTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.match = Match.objects.create(
+            match_id="EUW1_555",
+            game_creation=1,
+            game_end_ts=2,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=420,
+            objet_complet={
+                "metadata": {"matchId": "EUW1_555"},
+                "info": {
+                    "gameCreation": 1,
+                    "gameEndTimestamp": 2,
+                    "gameDuration": 1800,
+                    "gameMode": "CLASSIC",
+                    "gameType": "MATCHED_GAME",
+                    "gameVersion": "1.0",
+                    "mapId": 11,
+                    "queueId": 420,
+                    "participants": [
+                        {
+                            "participantId": 1,
+                            "puuid": "player-1",
+                            "riotIdGameName": "player",
+                            "riotIdTagline": "euw",
+                            "teamId": 100,
+                            "championId": "Urgot",
+                            "championName": "Urgot",
+                            "individualPosition": "TOP",
+                            "role": "SOLO",
+                            "summoner1Id": 4,
+                            "summoner2Id": 12,
+                            "kills": 5,
+                            "deaths": 3,
+                            "assists": 7,
+                            "totalDamageDealtToChampions": 15000,
+                            "damageSelfMitigated": 10000,
+                            "totalHeal": 250,
+                            "totalDamageTaken": 12000,
+                            "largestKillingSpree": 3,
+                            "pentaKills": 0,
+                            "quadraKills": 0,
+                            "visionScore": 20,
+                            "wardsPlaced": 8,
+                            "totalMinionsKilled": 180,
+                            "neutralMinionsKilled": 12,
+                            "timeCCingOthers": 10,
+                            "item0": 0,
+                            "item1": 0,
+                            "item2": 0,
+                            "item3": 0,
+                            "item4": 0,
+                            "item5": 0,
+                            "item6": 0,
+                            "goldEarned": 12000,
+                            "goldSpent": 11000,
+                            "champLevel": 16,
+                            "champExperience": 14000,
+                            "win": True,
+                            "firstBloodKill": False,
+                            "firstTowerKill": False,
+                            "teamPosition": "TOP",
+                            "timePlayed": 1800,
+                            "challenges": {},
+                        },
+                        {
+                            "participantId": 2,
+                            "puuid": "player-2",
+                            "riotIdGameName": "ally",
+                            "riotIdTagline": "euw",
+                            "teamId": 200,
+                            "championId": "Urgot",
+                            "championName": "Urgot",
+                            "individualPosition": "TOP",
+                            "role": "SOLO",
+                            "summoner1Id": 4,
+                            "summoner2Id": 12,
+                            "kills": 2,
+                            "deaths": 5,
+                            "assists": 4,
+                            "totalDamageDealtToChampions": 9000,
+                            "damageSelfMitigated": 8000,
+                            "totalHeal": 100,
+                            "totalDamageTaken": 14000,
+                            "largestKillingSpree": 2,
+                            "pentaKills": 0,
+                            "quadraKills": 0,
+                            "visionScore": 10,
+                            "wardsPlaced": 5,
+                            "totalMinionsKilled": 130,
+                            "neutralMinionsKilled": 3,
+                            "timeCCingOthers": 5,
+                            "item0": 0,
+                            "item1": 0,
+                            "item2": 0,
+                            "item3": 0,
+                            "item4": 0,
+                            "item5": 0,
+                            "item6": 0,
+                            "goldEarned": 9000,
+                            "goldSpent": 8500,
+                            "champLevel": 14,
+                            "champExperience": 11000,
+                            "win": False,
+                            "firstBloodKill": False,
+                            "firstTowerKill": False,
+                            "teamPosition": "TOP",
+                            "timePlayed": 1800,
+                            "challenges": {},
+                        },
+                    ],
+                    "teams": [
+                        {
+                            "teamId": 100,
+                            "win": True,
+                            "bans": [{"pickTurn": 1, "championId": "Urgot"}],
+                            "objectives": {
+                                "baron": {"first": False, "kills": 0},
+                                "dragon": {"first": True, "kills": 2},
+                                "tower": {"first": True, "kills": 8},
+                            },
+                        },
+                        {
+                            "teamId": 200,
+                            "win": False,
+                            "bans": [{"pickTurn": 1, "championId": "Urgot"}],
+                            "objectives": {
+                                "baron": {"first": False, "kills": 0},
+                                "dragon": {"first": False, "kills": 1},
+                                "tower": {"first": False, "kills": 3},
+                            },
+                        },
+                    ],
+                },
+            },
+        )
+
+    @patch("api.services.riot_importer.get_rank_entry_for_puuid", return_value={})
+    def test_repair_incomplete_match_imports_restores_missing_relations(self, _mock_rank):
+        result = repair_incomplete_match_imports(match_id=self.match.match_id)
+
+        self.assertEqual(result["checked"], 1)
+        self.assertEqual(result["repaired"], 1)
+        self.assertEqual(Participant.objects.filter(match=self.match).count(), 2)
+        self.assertEqual(Team.objects.filter(match=self.match).count(), 2)
+        self.assertEqual(Ban.objects.filter(match=self.match).count(), 2)
+        self.assertEqual(Objective.objects.filter(match=self.match).count(), 6)
+
+    @patch("api.views.repair_incomplete_match_imports")
+    def test_repair_endpoint_returns_service_summary(self, repair_mock):
+        repair_mock.return_value = {"checked": 1, "repaired": 1, "ok": 0, "skipped": 0, "details": []}
+
+        response = self.client.post(
+            reverse("repair-stored-imports"),
+            {"match_id": self.match.match_id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["repaired"], 1)
+        repair_mock.assert_called_once_with(match_id=self.match.match_id)
