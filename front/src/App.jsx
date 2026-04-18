@@ -13,6 +13,56 @@ const DEFAULT_QUERY = {
   value: "",
 };
 
+const DEFAULT_MATCH_FILTERS = {
+  queue: "",
+  championName: "",
+  position: "",
+};
+
+const POSITION_OPTIONS = [
+  { value: "TOP", label: "Top" },
+  { value: "JUNGLE", label: "Jungle" },
+  { value: "MIDDLE", label: "Mid" },
+  { value: "BOTTOM", label: "Bot" },
+  { value: "UTILITY", label: "Support" },
+];
+
+function hasActiveMatchFilters(filters) {
+  return Boolean(filters.queue || filters.championName || filters.position);
+}
+
+function buildMatchFilterParams(filters) {
+  return {
+    queue: filters.queue,
+    champion_name: filters.championName,
+    position: filters.position,
+  };
+}
+
+function matchesFilters(match, filters) {
+  if (filters.queue && String(match.queue) !== filters.queue) {
+    return false;
+  }
+
+  if (filters.championName && `${match.champion || ""}`.toLowerCase() !== filters.championName.toLowerCase()) {
+    return false;
+  }
+
+  if (filters.position && `${match.position || ""}`.toUpperCase() !== filters.position) {
+    return false;
+  }
+
+  return true;
+}
+
+function filterMatchesLocally(matchList, filters) {
+  if (!hasActiveMatchFilters(filters)) {
+    return matchList;
+  }
+
+  return matchList.filter((match) => matchesFilters(match, filters));
+}
+
 const RECENT_RIOT_IDS_STORAGE_KEY = "urgot_recent_riot_ids";
 const RECENT_RIOT_IDS_LIMIT = 8;
 
@@ -71,6 +121,8 @@ export function App() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [matches, setMatches] = useState([]);
+  const [pageMatches, setPageMatches] = useState([]);
+  const [remoteFilteredMatches, setRemoteFilteredMatches] = useState(false);
   const [matchesPagination, setMatchesPagination] = useState({ next: null, previous: null, count: 0, page: 1 });
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [globalStats, setGlobalStats] = useState(null);
@@ -79,6 +131,7 @@ export function App() {
   const [csEvolution, setCsEvolution] = useState([]);
   const [lpEvolution, setLpEvolution] = useState([]);
   const [recentRiotIds, setRecentRiotIds] = useState(() => readRecentRiotIdsFromStorage());
+  const [matchFilters, setMatchFilters] = useState(DEFAULT_MATCH_FILTERS);
 
   const hasQuery = query.value.trim().length > 0;
   const queryParams = useMemo(() => {
@@ -89,6 +142,23 @@ export function App() {
       ? { puuid: query.value.trim() }
       : { riot_name: query.value.trim() };
   }, [hasQuery, query]);
+
+  const matchFilterOptions = useMemo(
+    () => ({
+      modes: modeStats.map((mode) => ({
+        value: String(mode.queue),
+        label: mode.queue_name || `File ${mode.queue}`,
+        count: mode.total_games,
+      })),
+      champions: championStats.map((champion) => ({
+        value: champion.champion,
+        label: champion.champion,
+        count: champion.games,
+      })),
+      positions: POSITION_OPTIONS,
+    }),
+    [championStats, modeStats],
+  );
 
   function updateRecentRiotIds(nextValues) {
     const normalizedValues = normalizeRecentRiotIds(nextValues);
@@ -119,7 +189,17 @@ export function App() {
     loadRecentRiotIds();
   }, []);
 
-  async function loadDashboard(nextPage = 1) {
+  function selectVisibleMatch(matchResults) {
+    setSelectedMatchId((currentId) => {
+      if (!currentId) {
+        return matchResults[0]?.match_id || null;
+      }
+      const existsOnPage = matchResults.some((match) => match.match_id === currentId);
+      return existsOnPage ? currentId : matchResults[0]?.match_id || null;
+    });
+  }
+
+  async function loadDashboard(nextPage = 1, nextMatchFilters = matchFilters, options = {}) {
     if (!queryParams) {
       setError("Renseigne un Riot ID ou un PUUID.");
       return;
@@ -134,26 +214,26 @@ export function App() {
     setInfo("");
 
     try {
+      const matchParams = options.remoteFilters ? buildMatchFilterParams(nextMatchFilters) : {};
       const [matchesResponse, dashboardResponse] = await Promise.all([
-        fetchFrontMatches({ ...queryParams, page: nextPage }),
+        fetchFrontMatches({ ...queryParams, ...matchParams, page: nextPage }),
         fetchFrontDashboard(queryParams),
       ]);
 
       const matchResults = matchesResponse.results || [];
-      setMatches(matchResults);
+      const visibleMatches = options.remoteFilters ? matchResults : filterMatchesLocally(matchResults, nextMatchFilters);
+      if (!options.remoteFilters) {
+        setPageMatches(matchResults);
+      }
+      setRemoteFilteredMatches(Boolean(options.remoteFilters));
+      setMatches(visibleMatches);
       setMatchesPagination({
         next: matchesResponse.next,
         previous: matchesResponse.previous,
         count: matchesResponse.count || 0,
         page: nextPage,
       });
-      setSelectedMatchId((currentId) => {
-        if (!currentId) {
-          return matchResults[0]?.match_id || null;
-        }
-        const existsOnPage = matchResults.some((match) => match.match_id === currentId);
-        return existsOnPage ? currentId : matchResults[0]?.match_id || null;
-      });
+      selectVisibleMatch(visibleMatches);
       setGlobalStats(dashboardResponse.overview || null);
       setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
@@ -165,6 +245,20 @@ export function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleMatchFiltersChange(nextFilters) {
+    setMatchFilters(nextFilters);
+
+    const visibleMatches = filterMatchesLocally(pageMatches, nextFilters);
+    if (!queryParams || visibleMatches.length || !hasActiveMatchFilters(nextFilters)) {
+      setRemoteFilteredMatches(false);
+      setMatches(visibleMatches);
+      selectVisibleMatch(visibleMatches);
+      return;
+    }
+
+    await loadDashboard(1, nextFilters, { remoteFilters: true });
   }
 
   async function handleRefresh() {
@@ -198,14 +292,17 @@ export function App() {
       ]);
 
       const matchResults = matchesResponse.results || [];
-      setMatches(matchResults);
+      const visibleMatches = filterMatchesLocally(matchResults, matchFilters);
+      setPageMatches(matchResults);
+      setRemoteFilteredMatches(false);
+      setMatches(visibleMatches);
       setMatchesPagination({
         next: matchesResponse.next,
         previous: matchesResponse.previous,
         count: matchesResponse.count || 0,
         page: 1,
       });
-      setSelectedMatchId(matchResults[0]?.match_id || null);
+      setSelectedMatchId(visibleMatches[0]?.match_id || null);
       setGlobalStats(dashboardResponse.overview || null);
       setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
@@ -312,8 +409,11 @@ export function App() {
               pagination={matchesPagination}
               selectedMatchId={selectedMatchId}
               onSelectMatch={(match) => setSelectedMatchId(match.match_id)}
-              onPageChange={(page) => loadDashboard(page)}
+              onPageChange={(page) => loadDashboard(page, matchFilters, { remoteFilters: remoteFilteredMatches })}
               loading={loading}
+              filters={matchFilters}
+              filterOptions={matchFilterOptions}
+              onFiltersChange={handleMatchFiltersChange}
             />
           </div>
         </section>

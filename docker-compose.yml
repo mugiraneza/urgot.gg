@@ -9,6 +9,7 @@ services:
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
       RIOT_KEY: ${RIOT_KEY:-}
+      RIOT_IMPORT_WORKERS: ${RIOT_IMPORT_WORKERS:-5}
     volumes:
       - ./back:/app
     ports:

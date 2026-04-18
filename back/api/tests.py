@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 
 from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnapshot, Team
 from .services.riot_importer import (
+    get_rank_entry_for_puuid,
     insert_participants,
     insert_skill_orders,
     repair_incomplete_match_imports,
@@ -544,6 +545,11 @@ class RiotImporterAdvancedFieldsTests(TestCase):
         self.assertEqual(participant.primary_rune_selections, [8010, 9111])
         self.assertEqual(participant.secondary_rune_selections, [8444, 8451])
         self.assertEqual(participant.stat_perks["offense"], 5005)
+
+    @patch("api.services.riot_importer._get_json")
+    def test_get_rank_entry_skips_bot_puuid(self, mock_get_json):
+        self.assertEqual(get_rank_entry_for_puuid("BOT", "euw1"), {})
+        mock_get_json.assert_not_called()
 
     def test_insert_skill_orders_stores_timeline_progression(self):
         Participant.objects.create(

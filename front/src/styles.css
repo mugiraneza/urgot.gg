@@ -48,7 +48,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -609,6 +610,46 @@ button {
   margin-bottom: 16px;
 }
 
+.match-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.match-filters label {
+  display: grid;
+  gap: 7px;
+}
+
+.match-filters label span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.match-filters select {
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 36px 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  color: var(--text);
+  background: linear-gradient(145deg, #dbe3ec, #edf3f8);
+  box-shadow: var(--shadow-inset-soft);
+  outline: none;
+}
+
+.match-filters select:focus {
+  border-color: rgba(83, 119, 216, 0.28);
+  box-shadow:
+    var(--shadow-inset-soft),
+    0 0 0 4px rgba(83, 119, 216, 0.08);
+}
+
 .section-header.compact {
   margin-bottom: 12px;
 }
@@ -991,6 +1032,7 @@ button {
   .topbar,
   .search-strip,
   .search-strip-controls,
+  .match-filters,
   .match-summary,
   .match-expanded,
   .profile-highlight,

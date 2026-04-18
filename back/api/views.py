@@ -125,6 +125,27 @@ def _get_player_filters(request):
     return filters, None
 
 
+def _get_match_list_filters(request):
+    filters = {}
+
+    queue = request.GET.get("queue")
+    if queue:
+        try:
+            filters["match__queue_id"] = int(queue)
+        except ValueError:
+            pass
+
+    champion_name = (request.GET.get("champion_name") or "").strip()
+    if champion_name:
+        filters["champion_name__iexact"] = champion_name
+
+    position = (request.GET.get("position") or "").strip()
+    if position:
+        filters["team_position__iexact"] = position
+
+    return filters
+
+
 def _build_asset_url(request, asset_type, resource_name):
     if not resource_name:
         return None
@@ -343,9 +364,10 @@ def _serialize_participant_details(request, participant):
     }
 
 
-def _build_match_details(request, filters):
+def _build_match_details(request, filters, match_filters=None):
+    match_filters = match_filters or {}
     user_participants = (
-        Participant.objects.filter(**filters)
+        Participant.objects.filter(**filters, **match_filters)
         .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
         .order_by("-match__game_creation")
     )
@@ -386,6 +408,7 @@ def _build_match_details(request, filters):
             "rank_label": _format_rank_label(participant),
             "win": participant.win,
             "team_id": participant.team_id,
+            "queue": match.queue_id,
             "queue_name": QUEUE_NAMES.get(match.queue_id, f"Unknown ({match.queue_id})"),
             "game_duration": match.game_duration,
             "summoner_spells": [participant.summoner1_id, participant.summoner2_id],
@@ -801,6 +824,9 @@ class FrontMatchesView(views.APIView):
             openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
             openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
             openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Numéro de page"),
+            openapi.Parameter("queue", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Type de partie / queue Riot"),
+            openapi.Parameter("champion_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Champion joué par le joueur"),
+            openapi.Parameter("position", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Poste joué par le joueur"),
         ],
     )
     def get(self, request):
@@ -808,7 +834,7 @@ class FrontMatchesView(views.APIView):
         if error_response:
             return error_response
 
-        results = _build_match_details(request, filters)
+        results = _build_match_details(request, filters, _get_match_list_filters(request))
         paginator = PageNumberPagination()
         paginated_results = paginator.paginate_queryset(results, request)
         response = paginator.get_paginated_response(paginated_results)

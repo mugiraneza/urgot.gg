@@ -82,8 +82,27 @@ export function MatchesTable({
   onSelectMatch,
   onPageChange,
   loading,
+  filters,
+  filterOptions,
+  onFiltersChange,
 }) {
   const groups = groupMatchesByDay(matches);
+  const activeFiltersCount = [filters.queue, filters.championName, filters.position].filter(Boolean).length;
+
+  function updateFilter(key, value) {
+    onFiltersChange({
+      ...filters,
+      [key]: value,
+    });
+  }
+
+  function resetFilters() {
+    onFiltersChange({
+      queue: "",
+      championName: "",
+      position: "",
+    });
+  }
 
   return (
     <section className="feed-card">
@@ -93,6 +112,65 @@ export function MatchesTable({
           <h2>Flux de matchs</h2>
         </div>
         <span className="pill">{pagination.count} parties locales</span>
+      </div>
+
+      <div className="match-filters" aria-label="Filtres des parties">
+        <label>
+          <span>Type</span>
+          <select
+            value={filters.queue}
+            onChange={(event) => updateFilter("queue", event.currentTarget.value)}
+            disabled={loading}
+          >
+            <option value="">Tous les types</option>
+            {filterOptions.modes.map((mode) => (
+              <option value={mode.value} key={mode.value}>
+                {mode.label} ({mode.count})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>Champion</span>
+          <select
+            value={filters.championName}
+            onChange={(event) => updateFilter("championName", event.currentTarget.value)}
+            disabled={loading}
+          >
+            <option value="">Tous les champions</option>
+            {filterOptions.champions.map((champion) => (
+              <option value={champion.value} key={champion.value}>
+                {champion.label} ({champion.count})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>Poste</span>
+          <select
+            value={filters.position}
+            onChange={(event) => updateFilter("position", event.currentTarget.value)}
+            disabled={loading}
+          >
+            <option value="">Tous les postes</option>
+            {filterOptions.positions.map((position) => (
+              <option value={position.value} key={position.value}>
+                {position.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!activeFiltersCount || loading}
+          onClick={resetFilters}
+        >
+          Réinitialiser
+        </button>
       </div>
 
       <div className="match-feed">

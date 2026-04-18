@@ -85,14 +85,33 @@ def get_platform_region(match_id: str) -> str:
     return match_id.split("_", 1)[0].lower()
 
 
+def _is_rank_lookup_puuid(puuid: str) -> bool:
+    return bool(puuid and puuid != "BOT" and len(puuid) >= 20)
+
+
 def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
+    if not _is_rank_lookup_puuid(puuid):
+        return {}
+
     cache_key = f"{platform_region}:{puuid}"
     if cache_key in RANK_CACHE:
         return RANK_CACHE[cache_key]
 
-    entries = _get_json(
-        f"https://{platform_region}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
-    )
+    try:
+        entries = _get_json(
+            f"https://{platform_region}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
+        )
+    except requests.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code in (400, 404):
+            RANK_CACHE[cache_key] = {}
+            return {}
+        raise
+    except requests.RequestException as exc:
+        print(f"[!] Impossible de recuperer le rang pour {puuid}: {exc}")
+        RANK_CACHE[cache_key] = {}
+        return {}
+
     if not isinstance(entries, list):
         RANK_CACHE[cache_key] = {}
         return {}
