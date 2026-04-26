@@ -20,6 +20,26 @@ services:
         gunicorn back.wsgi:application --bind 0.0.0.0:8000 --workers=3
       "
 
+  import-worker:
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+    container_name: urgot-import-worker
+    depends_on:
+      - api
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret-key-change-me}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
+      RIOT_KEY: ${RIOT_KEY:-}
+      RIOT_IMPORT_WORKERS: ${RIOT_IMPORT_WORKERS:-5}
+    volumes:
+      - ./back:/app
+    command: >
+      sh -c "
+        python manage.py poll_tracked_imports --interval-minutes 30
+      "
+
   frontend:
     build:
       context: ./front
@@ -29,4 +49,3 @@ services:
       - api
     ports:
       - "80:80"
-

@@ -1,4 +1,5 @@
 from datetime import timedelta
+import requests
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -7,15 +8,32 @@ from django.utils import timezone
 from django.core.cache import cache
 from rest_framework.test import APIClient
 
-from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnapshot, Team
+from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnapshot, Team, TrackedSummoner
 from .services.riot_importer import (
+    _get_json,
     get_rank_entry_for_puuid,
     insert_participants,
     insert_skill_orders,
     repair_incomplete_match_imports,
     store_rank_snapshot,
 )
+from .services.tracked_imports import import_all_tracked_summoners
 from .views import running_imports
+
+
+class FakeRiotResponse:
+    def __init__(self, status_code=200, payload=None, headers=None):
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+        self.headers = headers or {}
+        self.response = self
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
 
 
 def participant_defaults(**overrides):
@@ -55,6 +73,51 @@ def participant_defaults(**overrides):
     }
     data.update(overrides)
     return data
+
+
+class RiotHttpClientTests(TestCase):
+    @patch("api.services.riot_importer.REQUEST_MAX_RETRIES", 3)
+    @patch("api.services.riot_importer.REQUEST_RETRY_BASE_DELAY", 0.1)
+    @patch("api.services.riot_importer.time.sleep")
+    @patch("api.services.riot_importer.requests.get")
+    def test_get_json_retries_transient_connection_errors(self, mock_get, mock_sleep):
+        mock_get.side_effect = [
+            requests.ConnectionError("network unreachable"),
+            FakeRiotResponse(payload={"ok": True}),
+        ]
+
+        payload = _get_json("https://europe.api.riotgames.com/test")
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(mock_get.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("api.services.riot_importer.REQUEST_MAX_RETRIES", 3)
+    @patch("api.services.riot_importer.REQUEST_RETRY_BASE_DELAY", 0.1)
+    @patch("api.services.riot_importer.time.sleep")
+    @patch("api.services.riot_importer.requests.get")
+    def test_get_json_raises_after_retry_budget_is_exhausted(self, mock_get, mock_sleep):
+        mock_get.side_effect = requests.ConnectionError("network unreachable")
+
+        with self.assertRaises(requests.ConnectionError):
+            _get_json("https://europe.api.riotgames.com/test")
+
+        self.assertEqual(mock_get.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    @patch("api.services.riot_importer.REQUEST_MAX_RETRIES", 2)
+    @patch("api.services.riot_importer.time.sleep")
+    @patch("api.services.riot_importer.requests.get")
+    def test_get_json_uses_retry_after_for_rate_limits(self, mock_get, mock_sleep):
+        mock_get.side_effect = [
+            FakeRiotResponse(status_code=429, headers={"Retry-After": "7"}),
+            FakeRiotResponse(payload={"ok": True}),
+        ]
+
+        payload = _get_json("https://europe.api.riotgames.com/test")
+
+        self.assertEqual(payload, {"ok": True})
+        mock_sleep.assert_called_once_with(7.0)
 
 
 class PositionStatsViewTests(TestCase):
@@ -141,6 +204,40 @@ class TriggerMatchImportViewSetTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"][0], "Recent#EUW")
+
+    @patch("api.views.threading.Thread")
+    def test_import_registers_tracked_summoner(self, thread_cls):
+        thread = thread_cls.return_value
+        thread.is_alive.return_value = False
+
+        self.client.post(
+            reverse("import-matches"),
+            {"riot_id": "Tracked#EUW", "region": "europe"},
+            format="json",
+        )
+
+        self.assertTrue(
+            TrackedSummoner.objects.filter(riot_name="Tracked#EUW", region="europe", is_active=True).exists()
+        )
+
+
+class TrackedImportsServiceTests(TestCase):
+    @patch("api.services.tracked_imports.run_match_import")
+    def test_import_all_tracked_summoners_processes_all_active_entries(self, mock_run_match_import):
+        TrackedSummoner.objects.create(riot_name="player1#EUW", region="europe", is_active=True)
+        TrackedSummoner.objects.create(riot_name="player2#NA1", region="americas", is_active=True)
+        TrackedSummoner.objects.create(riot_name="inactive#EUW", region="europe", is_active=False)
+
+        summary = import_all_tracked_summoners()
+
+        self.assertEqual(summary["total"], 2)
+        self.assertEqual(summary["success"], 2)
+        self.assertEqual(summary["error"], 0)
+        self.assertEqual(mock_run_match_import.call_count, 2)
+        self.assertEqual(
+            set(TrackedSummoner.objects.filter(last_import_status="success").values_list("riot_name", flat=True)),
+            {"player1#EUW", "player2#NA1"},
+        )
 
 
 class GlobalStatsViewTests(TestCase):

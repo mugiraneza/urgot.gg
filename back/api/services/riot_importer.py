@@ -10,6 +10,9 @@ RIOT_API_KEY = os.getenv("RIOT_KEY")
 MAX_MATCHES = int(1000)
 DELAY_SEC = float(1.3)
 IMPORT_WORKERS = max(1, int(os.getenv("RIOT_IMPORT_WORKERS", "4")))
+REQUEST_TIMEOUT = float(os.getenv("RIOT_REQUEST_TIMEOUT", "10"))
+REQUEST_MAX_RETRIES = max(1, int(os.getenv("RIOT_REQUEST_MAX_RETRIES", "5")))
+REQUEST_RETRY_BASE_DELAY = max(0.1, float(os.getenv("RIOT_REQUEST_RETRY_BASE_DELAY", "2")))
 HEADERS = {"X-Riot-Token": RIOT_API_KEY}
 RANKED_QUEUE_PRIORITY = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR"]
 RANK_CACHE: Dict[str, Dict] = {}
@@ -17,7 +20,7 @@ SUMMONER_CACHE: Dict[str, Dict] = {}
 DATA_DRAGON_BASE_URL = "https://ddragon.leagueoflegends.com"
 DATA_DRAGON_VERSION: Optional[str] = None
 
-def _get_json(url: str) -> Dict:
+def _get_json_without_retries(url: str) -> Dict:
     while True:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code == 429:
@@ -27,6 +30,50 @@ def _get_json(url: str) -> Dict:
             continue
         r.raise_for_status()
         return r.json()
+
+
+def _get_retry_delay(attempt: int, response: Optional[requests.Response] = None) -> float:
+    if response is not None and response.status_code == 429:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(0.0, float(retry_after))
+            except ValueError:
+                pass
+
+    return min(60.0, REQUEST_RETRY_BASE_DELAY * (2 ** (attempt - 1)))
+
+
+def _sleep_before_retry(url: str, attempt: int, reason: str, response: Optional[requests.Response] = None) -> None:
+    wait = _get_retry_delay(attempt, response)
+    print(
+        f"[!] Riot API indisponible ({reason}). "
+        f"Nouvel essai {attempt + 1}/{REQUEST_MAX_RETRIES} dans {wait:g}s: {url}"
+    )
+    time.sleep(wait)
+
+
+def _get_json(url: str) -> Dict:
+    for attempt in range(1, REQUEST_MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        except requests.RequestException as exc:
+            if attempt >= REQUEST_MAX_RETRIES:
+                print(f"[!] Riot API inaccessible apres {REQUEST_MAX_RETRIES} essais: {url}")
+                raise
+            _sleep_before_retry(url, attempt, str(exc))
+            continue
+
+        if r.status_code == 429 or 500 <= r.status_code < 600:
+            if attempt >= REQUEST_MAX_RETRIES:
+                r.raise_for_status()
+            _sleep_before_retry(url, attempt, f"HTTP {r.status_code}", r)
+            continue
+
+        r.raise_for_status()
+        return r.json()
+
+    raise RuntimeError("Riot API inaccessible.")
 
 def split_riot_id(rid: str) -> Tuple[str, str]:
     if "#" not in rid:

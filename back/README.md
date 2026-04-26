@@ -57,3 +57,21 @@ docker compose up --build
 - API : http://127.0.0.1:8000/api/
 - Swagger : http://127.0.0.1:8000/swagger/
 - ReDoc : http://127.0.0.1:8000/redoc/
+
+## Import batch des joueurs suivis
+
+Quand un joueur lance un import manuel, son Riot ID est maintenant enregistre en base comme joueur suivi. Tu peux ensuite lancer un batch periodique pour reimporter tout le monde.
+
+Un seul batch :
+
+```powershell
+python manage.py poll_tracked_imports --once
+```
+
+Service en boucle toutes les 30 minutes :
+
+```powershell
+python manage.py poll_tracked_imports --interval-minutes 30
+```
+
+En Docker, ce role est porte par le service `import-worker`.

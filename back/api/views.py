@@ -9,6 +9,7 @@ from .services.riot_importer import (
 )
 from .services.import_champions_items import RiotDataImporter
 from .services.new_summoner_name import get_riot_id_by_puuid  # importe ta logique
+from .services.tracked_imports import list_tracked_riot_ids, register_tracked_summoner
 from .models import *
 from .serializers import (
     MatchSerializer,
@@ -106,6 +107,9 @@ def _store_recent_riot_id(riot_id):
 
 
 def _get_recent_riot_ids():
+    tracked_ids = list_tracked_riot_ids()
+    if tracked_ids:
+        return tracked_ids
     return cache.get(RECENT_RIOT_IDS_CACHE_KEY, [])
 
 
@@ -876,6 +880,7 @@ class TriggerMatchImportViewSet(views.APIView):
             riot_id = request.data.get("riot_id", "proctologue#urgot")
             region = request.data.get("region", "europe")
             _store_recent_riot_id(riot_id)
+            register_tracked_summoner(riot_id, region)
             existing_thread = running_imports.get(riot_id)
             if existing_thread and existing_thread.is_alive():
                 return Response(
@@ -886,6 +891,8 @@ class TriggerMatchImportViewSet(views.APIView):
             def import_task():
                 try:
                     run_match_import(riot_id, region)
+                except Exception as exc:
+                    print(f"[!] Import echoue pour {riot_id} ({region}): {exc}")
                 finally:
                     running_imports.pop(riot_id, None)
             thread = threading.Thread(target=import_task, daemon=True)

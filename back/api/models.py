@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class Match(models.Model):
@@ -129,6 +130,34 @@ class RankSnapshot(models.Model):
 
     class Meta:
         unique_together = ("match", "puuid", "queue_type")
+
+
+class TrackedSummoner(models.Model):
+    riot_name = models.CharField(max_length=100)
+    region = models.CharField(max_length=20, default="europe")
+    is_active = models.BooleanField(default=True)
+    last_import_started_at = models.DateTimeField(null=True, blank=True)
+    last_import_finished_at = models.DateTimeField(null=True, blank=True)
+    last_import_status = models.CharField(max_length=20, blank=True, default="")
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("riot_name", "region")
+        ordering = ["riot_name", "region"]
+
+    def mark_import_started(self):
+        self.last_import_started_at = timezone.now()
+        self.last_import_status = "running"
+        self.last_error = ""
+        self.save(update_fields=["last_import_started_at", "last_import_status", "last_error", "updated_at"])
+
+    def mark_import_finished(self, status: str, error: str = ""):
+        self.last_import_finished_at = timezone.now()
+        self.last_import_status = status
+        self.last_error = error
+        self.save(update_fields=["last_import_finished_at", "last_import_status", "last_error", "updated_at"])
 
 
 class Ban(models.Model):

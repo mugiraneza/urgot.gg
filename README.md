@@ -61,3 +61,23 @@ cd front
 npm install
 npm run dev
 ```
+
+## Batch auto toutes les 30 minutes
+
+Nouvelle approche recommandee : chaque joueur importe manuellement une premiere fois, ce qui l'inscrit dans la liste des joueurs suivis. Ensuite un service backend relance l'import pour tous les inscrits toutes les 30 minutes.
+
+Lancer un seul batch :
+
+```powershell
+cd back
+python manage.py poll_tracked_imports --once
+```
+
+Lancer le service en boucle :
+
+```powershell
+cd back
+python manage.py poll_tracked_imports --interval-minutes 30
+```
+
+Avec Docker, ce batch est maintenant lance automatiquement via le service `import-worker` quand tu fais `docker compose up --build`.
