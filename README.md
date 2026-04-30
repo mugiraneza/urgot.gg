@@ -25,7 +25,17 @@ DJANGO_SECRET_KEY=change-me
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,api
 RIOT_KEY=
+API_GUNICORN_WORKERS=2
+RIOT_IMPORT_CACHE_MAX_SIZE=1000
+API_MEM_LIMIT=768m
+API_MEM_RESERVATION=512m
 ```
+
+Reglage memoire utile si l'API consomme trop de RAM :
+
+- `API_GUNICORN_WORKERS` controle le nombre de processus Gunicorn pour l'API.
+- `RIOT_IMPORT_CACHE_MAX_SIZE` borne les caches memoire utilises par l'import Riot.
+- `API_MEM_LIMIT` et `API_MEM_RESERVATION` limitent la RAM du conteneur API.
 
 ## Lancement Docker
 

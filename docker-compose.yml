@@ -10,14 +10,18 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
       RIOT_KEY: ${RIOT_KEY:-}
       RIOT_IMPORT_WORKERS: ${RIOT_IMPORT_WORKERS:-5}
+      API_GUNICORN_WORKERS: ${API_GUNICORN_WORKERS:-2}
+      RIOT_IMPORT_CACHE_MAX_SIZE: ${RIOT_IMPORT_CACHE_MAX_SIZE:-1000}
     volumes:
       - ./back:/app
     ports:
       - "8000:8000"
+    mem_limit: ${API_MEM_LIMIT:-768m}
+    mem_reservation: ${API_MEM_RESERVATION:-512m}
     command: >
       sh -c "
         python manage.py migrate &&
-        gunicorn back.wsgi:application --bind 0.0.0.0:8000 --workers=3
+        gunicorn back.wsgi:application --bind 0.0.0.0:8000 --workers=${API_GUNICORN_WORKERS:-2}
       "
 
   import-worker:
@@ -33,8 +37,11 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
       RIOT_KEY: ${RIOT_KEY:-}
       RIOT_IMPORT_WORKERS: ${RIOT_IMPORT_WORKERS:-5}
+      RIOT_IMPORT_CACHE_MAX_SIZE: ${RIOT_IMPORT_CACHE_MAX_SIZE:-1000}
     volumes:
       - ./back:/app
+    mem_limit: ${IMPORT_WORKER_MEM_LIMIT:-512m}
+    mem_reservation: ${IMPORT_WORKER_MEM_RESERVATION:-256m}
     command: >
       sh -c "
         python manage.py poll_tracked_imports --interval-minutes 30
@@ -49,3 +56,5 @@ services:
       - api
     ports:
       - "80:80"
+    mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
+    mem_reservation: ${FRONTEND_MEM_RESERVATION:-128m}

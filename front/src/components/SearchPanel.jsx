@@ -1,6 +1,14 @@
 import { useMemo, useState } from "preact/hooks";
 
-export function SearchPanel({ query, onQueryChange, onSubmit, onRefresh, loading, recentRiotIds = [] }) {
+export function SearchPanel({
+  query,
+  regionOptions = [],
+  onQueryChange,
+  onSubmit,
+  onRefresh,
+  loading,
+  recentRiotIds = [],
+}) {
   const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
 
   const filteredRecentRiotIds = useMemo(() => {
@@ -87,6 +95,20 @@ export function SearchPanel({ query, onQueryChange, onSubmit, onRefresh, loading
             </div>
           ) : null}
         </div>
+
+        <label className="search-region-field">
+          <select
+            className="search-select"
+            value={query.region || "europe"}
+            onChange={(event) => onQueryChange({ ...query, region: event.currentTarget.value })}
+          >
+            {regionOptions.map((region) => (
+              <option key={region.value} value={region.value}>
+                {region.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <button type="button" className="primary-button" onClick={onSubmit} disabled={loading}>
           {loading ? "Chargement" : "Afficher"}

@@ -13,6 +13,13 @@ Copy-Item .env.example .env
 
 Si tu veux importer des matchs Riot, renseigne `RIOT_KEY` dans `.env`.
 
+Si l'API prend trop de RAM, tu peux ajuster dans `.env` :
+
+- `API_GUNICORN_WORKERS=2`
+- `API_MEM_LIMIT=768m`
+- `API_MEM_RESERVATION=512m`
+- `RIOT_IMPORT_CACHE_MAX_SIZE=1000`
+
 ## Lancer le projet
 
 ```powershell

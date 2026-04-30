@@ -2,7 +2,9 @@ import os
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 from django.db import transaction
 from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
 
@@ -13,12 +15,49 @@ IMPORT_WORKERS = max(1, int(os.getenv("RIOT_IMPORT_WORKERS", "4")))
 REQUEST_TIMEOUT = float(os.getenv("RIOT_REQUEST_TIMEOUT", "10"))
 REQUEST_MAX_RETRIES = max(1, int(os.getenv("RIOT_REQUEST_MAX_RETRIES", "5")))
 REQUEST_RETRY_BASE_DELAY = max(0.1, float(os.getenv("RIOT_REQUEST_RETRY_BASE_DELAY", "2")))
+IMPORT_CACHE_MAX_SIZE = max(1, int(os.getenv("RIOT_IMPORT_CACHE_MAX_SIZE", "1000")))
 HEADERS = {"X-Riot-Token": RIOT_API_KEY}
 RANKED_QUEUE_PRIORITY = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR"]
-RANK_CACHE: Dict[str, Dict] = {}
-SUMMONER_CACHE: Dict[str, Dict] = {}
 DATA_DRAGON_BASE_URL = "https://ddragon.leagueoflegends.com"
 DATA_DRAGON_VERSION: Optional[str] = None
+ACCOUNT_REGION_BY_PLATFORM = {
+    "br1": "americas",
+    "eun1": "europe",
+    "euw1": "europe",
+    "jp1": "asia",
+    "kr": "asia",
+    "la1": "americas",
+    "la2": "americas",
+    "na1": "americas",
+    "oc1": "americas",
+    "ru": "europe",
+    "tr1": "europe",
+}
+ACCOUNT_REGIONS = ("europe", "americas", "asia", "sea")
+
+
+class BoundedCache:
+    def __init__(self, max_size: int):
+        self.max_size = max_size
+        self._store: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        value = self._store.get(key)
+        if value is None:
+            return None
+        self._store.move_to_end(key)
+        return value
+
+    def set(self, key: str, value: Dict[str, Any]) -> Dict[str, Any]:
+        self._store[key] = value
+        self._store.move_to_end(key)
+        if len(self._store) > self.max_size:
+            self._store.popitem(last=False)
+        return value
+
+
+RANK_CACHE = BoundedCache(IMPORT_CACHE_MAX_SIZE)
+SUMMONER_CACHE = BoundedCache(IMPORT_CACHE_MAX_SIZE)
 
 def _get_json_without_retries(url: str) -> Dict:
     while True:
@@ -78,11 +117,55 @@ def _get_json(url: str) -> Dict:
 def split_riot_id(rid: str) -> Tuple[str, str]:
     if "#" not in rid:
         raise ValueError("Format attendu : nom#tag")
-    return rid.split("#", 1)
+    name, tag = rid.split("#", 1)
+    return name.strip(), tag.strip()
+
+
+def normalize_account_region(region: Optional[str]) -> str:
+    normalized_region = (region or "europe").strip().lower()
+    if normalized_region in ACCOUNT_REGIONS:
+        return normalized_region
+
+    cluster_region = ACCOUNT_REGION_BY_PLATFORM.get(normalized_region)
+    if cluster_region:
+        return cluster_region
+
+    raise ValueError(f"Region inconnue : {region}")
 
 def get_puuid(name: str, tag: str, region: str) -> str:
-    url = f"https://{region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{name}/{tag}"
-    return _get_json(url)["puuid"]
+    return get_account_by_riot_id(name, tag, region)["puuid"]
+
+
+def get_account_by_riot_id(name: str, tag: str, region: str) -> Dict[str, Any]:
+    normalized_region = normalize_account_region(region)
+    encoded_name = quote(name, safe="")
+    encoded_tag = quote(tag, safe="")
+    url = f"https://{normalized_region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{encoded_name}/{encoded_tag}"
+    print(url)
+    account = _get_json(url)
+    if not isinstance(account, dict) or not account.get("puuid"):
+        raise RuntimeError("Reponse Riot invalide pour ce Riot ID.")
+    return {
+        "region": normalized_region,
+        "puuid": account["puuid"],
+        "gameName": account.get("gameName"),
+        "tagLine": account.get("tagLine"),
+    }
+
+
+def find_accounts_by_riot_id(name: str, tag: str) -> List[Dict[str, Any]]:
+    matches: List[Dict[str, Any]] = []
+
+    for account_region in ACCOUNT_REGIONS:
+        try:
+            matches.append(get_account_by_riot_id(name, tag, account_region))
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code == 404:
+                continue
+            raise
+
+    return matches
 
 def get_all_match_ids(puuid: str, region: str, total: int = MAX_MATCHES) -> List[str]:
     ids, start, step = [], 0, 100
@@ -141,8 +224,9 @@ def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
         return {}
 
     cache_key = f"{platform_region}:{puuid}"
-    if cache_key in RANK_CACHE:
-        return RANK_CACHE[cache_key]
+    cached_entry = RANK_CACHE.get(cache_key)
+    if cached_entry is not None:
+        return cached_entry
 
     try:
         entries = _get_json(
@@ -151,26 +235,21 @@ def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
     except requests.HTTPError as exc:
         status_code = exc.response.status_code if exc.response is not None else None
         if status_code in (400, 404):
-            RANK_CACHE[cache_key] = {}
-            return {}
+            return RANK_CACHE.set(cache_key, {})
         raise
     except requests.RequestException as exc:
         print(f"[!] Impossible de recuperer le rang pour {puuid}: {exc}")
-        RANK_CACHE[cache_key] = {}
-        return {}
+        return RANK_CACHE.set(cache_key, {})
 
     if not isinstance(entries, list):
-        RANK_CACHE[cache_key] = {}
-        return {}
+        return RANK_CACHE.set(cache_key, {})
 
     for queue_type in RANKED_QUEUE_PRIORITY:
         for entry in entries:
             if entry.get("queueType") == queue_type:
-                RANK_CACHE[cache_key] = entry
-                return entry
+                return RANK_CACHE.set(cache_key, entry)
 
-    RANK_CACHE[cache_key] = entries[0] if entries else {}
-    return RANK_CACHE[cache_key]
+    return RANK_CACHE.set(cache_key, entries[0] if entries else {})
 
 
 def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
@@ -178,8 +257,9 @@ def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
         return {}
 
     cache_key = f"{platform_region}:{puuid}"
-    if cache_key in SUMMONER_CACHE:
-        return SUMMONER_CACHE[cache_key]
+    cached_profile = SUMMONER_CACHE.get(cache_key)
+    if cached_profile is not None:
+        return cached_profile
 
     try:
         data = _get_json(
@@ -188,8 +268,7 @@ def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
     except requests.RequestException:
         data = {}
 
-    SUMMONER_CACHE[cache_key] = data if isinstance(data, dict) else {}
-    return SUMMONER_CACHE[cache_key]
+    return SUMMONER_CACHE.set(cache_key, data if isinstance(data, dict) else {})
 
 
 def get_latest_data_dragon_version() -> Optional[str]:
@@ -593,7 +672,19 @@ def run_find_puid(riot_id: str, region: str):
     if not RIOT_API_KEY:
         raise RuntimeError("RIOT_API_KEY manquante.")
     name, tag = split_riot_id(riot_id)
-    return get_puuid(name, tag, region)
+    if region:
+        return get_account_by_riot_id(name, tag, region)
+
+    matches = find_accounts_by_riot_id(name, tag)
+    if not matches:
+        raise RuntimeError("Aucun compte Riot trouve pour ce Riot ID.")
+    if len(matches) == 1:
+        return matches[0]
+
+    raise RuntimeError(
+        "Plusieurs comptes trouves pour ce Riot ID. Precise la region: "
+        + ", ".join(match["region"] for match in matches)
+    )
 
 def run_match_import(riot_id: str, region: str):
     if not RIOT_API_KEY:

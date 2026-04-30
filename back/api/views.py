@@ -1734,15 +1734,26 @@ class FindPuidView(views.APIView):
     )
     def get(self, request):
         try:
-            riot_id = request.GET.get("riot_id")
+            riot_id = (request.GET.get("riot_id") or "").strip()
             region = request.GET.get("region")
             print(riot_id)
             if not riot_id :
-                return Response({"status": "veuillez rajouter riot_id dans le GET"}, status=200)
+                return Response({"error": "veuillez rajouter riot_id dans le GET"}, status=400)
             resultat = run_find_puid(riot_id,region)
-            return Response({"puid":  resultat}, status=200)
-        except:
-            return Response({"status": "une erreur a eu lieu"}, status=404)
+            return Response(
+                {
+                    "puuid": resultat["puuid"],
+                    "puid": resultat["puuid"],
+                    "gameName": resultat.get("gameName"),
+                    "tagLine": resultat.get("tagLine"),
+                    "region": resultat.get("region"),
+                },
+                status=200,
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except Exception as exc:
+            return Response({"error": str(exc)}, status=404)
 class FindNewUsernameView(views.APIView):
     @swagger_auto_schema(
         operation_description="Récupérer le nouveau summoner name",

@@ -11,7 +11,15 @@ import { ChartCard } from "./components/ChartCard";
 const DEFAULT_QUERY = {
   mode: "riot_name",
   value: "",
+  region: "europe",
 };
+
+const REGION_OPTIONS = [
+  { value: "europe", label: "Europe" },
+  { value: "americas", label: "Americas" },
+  { value: "asia", label: "Asia" },
+  { value: "sea", label: "SEA" },
+];
 
 const DEFAULT_MATCH_FILTERS = {
   queue: "",
@@ -279,7 +287,7 @@ export function App() {
       if (query.mode === "riot_name") {
         const importResponse = await triggerMatchImport({
           riot_id: query.value.trim(),
-          region: "europe",
+          region: query.region,
         });
         setInfo(importResponse.message || "Import lancé en arrière-plan.");
       } else {
@@ -322,6 +330,7 @@ export function App() {
     <AppShell loading={loading} playerLabel={query.value}>
       <SearchPanel
         query={query}
+        regionOptions={REGION_OPTIONS}
         onQueryChange={setQuery}
         onSubmit={() => loadDashboard(1)}
         onRefresh={handleRefresh}

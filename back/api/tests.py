@@ -10,10 +10,15 @@ from rest_framework.test import APIClient
 
 from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnapshot, Team, TrackedSummoner
 from .services.riot_importer import (
+    BoundedCache,
     _get_json,
+    find_accounts_by_riot_id,
+    get_account_by_riot_id,
     get_rank_entry_for_puuid,
+    get_puuid,
     insert_participants,
     insert_skill_orders,
+    normalize_account_region,
     repair_incomplete_match_imports,
     store_rank_snapshot,
 )
@@ -76,6 +81,91 @@ def participant_defaults(**overrides):
 
 
 class RiotHttpClientTests(TestCase):
+    def test_bounded_cache_evicts_oldest_entry(self):
+        cache_store = BoundedCache(max_size=2)
+
+        cache_store.set("first", {"value": 1})
+        cache_store.set("second", {"value": 2})
+        cache_store.set("third", {"value": 3})
+
+        self.assertIsNone(cache_store.get("first"))
+        self.assertEqual(cache_store.get("second"), {"value": 2})
+        self.assertEqual(cache_store.get("third"), {"value": 3})
+
+    def test_bounded_cache_refreshes_recently_used_entry(self):
+        cache_store = BoundedCache(max_size=2)
+
+        cache_store.set("first", {"value": 1})
+        cache_store.set("second", {"value": 2})
+        self.assertEqual(cache_store.get("first"), {"value": 1})
+
+        cache_store.set("third", {"value": 3})
+
+        self.assertEqual(cache_store.get("first"), {"value": 1})
+        self.assertIsNone(cache_store.get("second"))
+        self.assertEqual(cache_store.get("third"), {"value": 3})
+
+    @patch("api.services.riot_importer._get_json", return_value={"puuid": "player-puuid"})
+    def test_get_puuid_normalizes_platform_region_to_account_cluster(self, mock_get_json):
+        puuid = get_puuid("player", "EUW", "euw1")
+
+        self.assertEqual(puuid, "player-puuid")
+        mock_get_json.assert_called_once_with(
+            "https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/player/EUW"
+        )
+
+    @patch(
+        "api.services.riot_importer._get_json",
+        return_value={"puuid": "player-puuid", "gameName": "player", "tagLine": "EUW"},
+    )
+    def test_get_account_by_riot_id_returns_account_payload_with_region(self, mock_get_json):
+        account = get_account_by_riot_id("player", "EUW", "euw1")
+
+        self.assertEqual(
+            account,
+            {
+                "region": "europe",
+                "puuid": "player-puuid",
+                "gameName": "player",
+                "tagLine": "EUW",
+            },
+        )
+        mock_get_json.assert_called_once()
+
+    @patch("api.services.riot_importer._get_json", return_value={"puuid": "encoded-puuid"})
+    def test_get_puuid_url_encodes_riot_id_parts(self, mock_get_json):
+        puuid = get_puuid("The Player", "EU/W", "europe")
+
+        self.assertEqual(puuid, "encoded-puuid")
+        mock_get_json.assert_called_once_with(
+            "https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/The%20Player/EU%2FW"
+        )
+
+    def test_normalize_account_region_rejects_unknown_value(self):
+        with self.assertRaises(ValueError):
+            normalize_account_region("unknown")
+
+    @patch("api.services.riot_importer.get_account_by_riot_id")
+    def test_find_accounts_by_riot_id_collects_accounts_across_regions(self, mock_get_account):
+        def side_effect(_name, _tag, region):
+            if region == "europe":
+                return {"region": "europe", "puuid": "eu-puuid", "gameName": "player", "tagLine": "EUW"}
+            if region == "americas":
+                return {"region": "americas", "puuid": "na-puuid", "gameName": "player", "tagLine": "EUW"}
+            raise requests.HTTPError(response=FakeRiotResponse(status_code=404))
+
+        mock_get_account.side_effect = side_effect
+
+        matches = find_accounts_by_riot_id("player", "EUW")
+
+        self.assertEqual(
+            matches,
+            [
+                {"region": "europe", "puuid": "eu-puuid", "gameName": "player", "tagLine": "EUW"},
+                {"region": "americas", "puuid": "na-puuid", "gameName": "player", "tagLine": "EUW"},
+            ],
+        )
+
     @patch("api.services.riot_importer.REQUEST_MAX_RETRIES", 3)
     @patch("api.services.riot_importer.REQUEST_RETRY_BASE_DELAY", 0.1)
     @patch("api.services.riot_importer.time.sleep")
@@ -219,6 +309,31 @@ class TriggerMatchImportViewSetTests(TestCase):
         self.assertTrue(
             TrackedSummoner.objects.filter(riot_name="Tracked#EUW", region="europe", is_active=True).exists()
         )
+
+
+class FindPuuidViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @patch(
+        "api.views.run_find_puid",
+        return_value={
+            "region": "europe",
+            "puuid": "resolved-puuid",
+            "gameName": "player",
+            "tagLine": "EUW",
+        },
+    )
+    def test_find_puuid_view_returns_puuid_for_platform_region(self, mock_run_find_puid):
+        response = self.client.get(
+            reverse("findusmmoner-puid"),
+            {"riot_id": "player#EUW", "region": "euw1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["puuid"], "resolved-puuid")
+        self.assertEqual(response.json()["region"], "europe")
+        mock_run_find_puid.assert_called_once_with("player#EUW", "euw1")
 
 
 class TrackedImportsServiceTests(TestCase):
