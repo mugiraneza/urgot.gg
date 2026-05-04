@@ -928,9 +928,44 @@ button {
 
 .match-expanded {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   padding: 0 16px 16px;
+}
+
+.match-expanded-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.match-detail-tabs {
+  display: grid;
+  gap: 14px;
+}
+
+.match-tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.match-tab-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: linear-gradient(145deg, #edf3f8, #d7e0e8);
+  box-shadow: var(--shadow-soft);
+  color: #5f7387;
+  font: inherit;
+  cursor: pointer;
+}
+
+.match-tab-button.is-active {
+  background: linear-gradient(145deg, #dbe7ff, #bfd2fb);
+  color: #264eaf;
+}
+
+.tab-panel-grid {
+  display: grid;
+  gap: 12px;
 }
 
 .expanded-team h4 {

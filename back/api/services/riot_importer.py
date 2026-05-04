@@ -6,7 +6,9 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 from django.db import transaction
+from django.utils import timezone
 from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
+from datetime import datetime
 
 RIOT_API_KEY = os.getenv("RIOT_KEY")
 MAX_MATCHES = int(1000)
@@ -18,6 +20,10 @@ REQUEST_RETRY_BASE_DELAY = max(0.1, float(os.getenv("RIOT_REQUEST_RETRY_BASE_DEL
 IMPORT_CACHE_MAX_SIZE = max(1, int(os.getenv("RIOT_IMPORT_CACHE_MAX_SIZE", "1000")))
 HEADERS = {"X-Riot-Token": RIOT_API_KEY}
 RANKED_QUEUE_PRIORITY = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR"]
+MATCH_QUEUE_TO_RANK_QUEUE = {
+    420: "RANKED_SOLO_5x5",
+    440: "RANKED_FLEX_SR",
+}
 DATA_DRAGON_BASE_URL = "https://ddragon.leagueoflegends.com"
 DATA_DRAGON_VERSION: Optional[str] = None
 ACCOUNT_REGION_BY_PLATFORM = {
@@ -34,6 +40,10 @@ ACCOUNT_REGION_BY_PLATFORM = {
     "tr1": "europe",
 }
 ACCOUNT_REGIONS = ("europe", "americas", "asia", "sea")
+
+
+def _current_log_timestamp():
+    return timezone.localtime().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 class BoundedCache:
@@ -141,7 +151,6 @@ def get_account_by_riot_id(name: str, tag: str, region: str) -> Dict[str, Any]:
     encoded_name = quote(name, safe="")
     encoded_tag = quote(tag, safe="")
     url = f"https://{normalized_region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{encoded_name}/{encoded_tag}"
-    print(url)
     account = _get_json(url)
     if not isinstance(account, dict) or not account.get("puuid"):
         raise RuntimeError("Reponse Riot invalide pour ce Riot ID.")
@@ -219,14 +228,18 @@ def _is_rank_lookup_puuid(puuid: str) -> bool:
     return bool(puuid and puuid != "BOT" and len(puuid) >= 20)
 
 
-def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
+def _get_ranked_queue_type_for_match(match: Match) -> Optional[str]:
+    return MATCH_QUEUE_TO_RANK_QUEUE.get(match.queue_id)
+
+
+def get_rank_entries_for_puuid(puuid: str, platform_region: str) -> Dict[str, Dict]:
     if not _is_rank_lookup_puuid(puuid):
         return {}
 
     cache_key = f"{platform_region}:{puuid}"
-    cached_entry = RANK_CACHE.get(cache_key)
-    if cached_entry is not None:
-        return cached_entry
+    cached_entries = RANK_CACHE.get(cache_key)
+    if cached_entries is not None:
+        return cached_entries
 
     try:
         entries = _get_json(
@@ -244,12 +257,31 @@ def get_rank_entry_for_puuid(puuid: str, platform_region: str) -> Dict:
     if not isinstance(entries, list):
         return RANK_CACHE.set(cache_key, {})
 
-    for queue_type in RANKED_QUEUE_PRIORITY:
-        for entry in entries:
-            if entry.get("queueType") == queue_type:
-                return RANK_CACHE.set(cache_key, entry)
+    ranked_entries = {
+        entry.get("queueType"): entry
+        for entry in entries
+        if entry.get("queueType")
+    }
+    return RANK_CACHE.set(cache_key, ranked_entries)
 
-    return RANK_CACHE.set(cache_key, entries[0] if entries else {})
+
+def get_rank_entry_for_puuid(
+    puuid: str,
+    platform_region: str,
+    preferred_queue_type: Optional[str] = None,
+) -> Dict:
+    entries_by_queue = get_rank_entries_for_puuid(puuid, platform_region)
+    if not entries_by_queue:
+        return {}
+
+    if preferred_queue_type and preferred_queue_type in entries_by_queue:
+        return entries_by_queue[preferred_queue_type]
+
+    for queue_type in RANKED_QUEUE_PRIORITY:
+        if queue_type in entries_by_queue:
+            return entries_by_queue[queue_type]
+
+    return next(iter(entries_by_queue.values()), {})
 
 
 def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
@@ -302,24 +334,25 @@ def build_profile_icon_url(profile_icon_id: Optional[int]) -> Optional[str]:
 
 def store_rank_snapshot(match_id: str, puuid: str, riot_name: str) -> None:
     platform_region = get_platform_region(match_id)
-    rank_entry = get_rank_entry_for_puuid(puuid, platform_region)
-    if not rank_entry:
+    rank_entries = get_rank_entries_for_puuid(puuid, platform_region)
+    if not rank_entries:
         return
 
     match = Match.objects.get(pk=match_id)
-    RankSnapshot.objects.update_or_create(
-        match=match,
-        puuid=puuid,
-        queue_type=rank_entry.get("queueType", ""),
-        defaults={
-            "riot_name": riot_name,
-            "tier": rank_entry.get("tier", ""),
-            "rank_division": rank_entry.get("rank", ""),
-            "league_points": rank_entry.get("leaguePoints"),
-            "wins": rank_entry.get("wins"),
-            "losses": rank_entry.get("losses"),
-        },
-    )
+    for queue_type, rank_entry in rank_entries.items():
+        RankSnapshot.objects.update_or_create(
+            match=match,
+            puuid=puuid,
+            queue_type=queue_type,
+            defaults={
+                "riot_name": riot_name,
+                "tier": rank_entry.get("tier", ""),
+                "rank_division": rank_entry.get("rank", ""),
+                "league_points": rank_entry.get("leaguePoints"),
+                "wins": rank_entry.get("wins"),
+                "losses": rank_entry.get("losses"),
+            },
+        )
 
 
 def _extract_ping_stats(participant: Dict) -> Dict:
@@ -511,10 +544,15 @@ def insert_teams(mid: str, teams: List[Dict]):
 def insert_participants(mid: str, participants: List[Dict]):
     match = Match.objects.get(pk=mid)
     platform_region = get_platform_region(mid)
+    preferred_queue_type = _get_ranked_queue_type_for_match(match)
     for p in participants:
         puuid = p["puuid"]
-        rank_entry = get_rank_entry_for_puuid(puuid, platform_region)
-        Participant.objects.get_or_create(
+        rank_entry = get_rank_entry_for_puuid(
+            puuid,
+            platform_region,
+            preferred_queue_type=preferred_queue_type,
+        )
+        Participant.objects.update_or_create(
             match=match,
             participant_id=p["participantId"],
             defaults=_participant_defaults(p, rank_entry),
@@ -728,8 +766,9 @@ def run_match_import(riot_id: str, region: str):
                 insert_skill_orders(mid, timeline)
 
 
-    if to_do:
+    snapshot_match_id = to_do[0] if to_do else (all_ids[0] if all_ids else None)
+    if snapshot_match_id:
         # Riot ne fournit pas le LP gagne/perdu dans les donnees de match.
-        # On capture l'etat classe courant et on l'associe au match le plus recent importe.
-        store_rank_snapshot(to_do[0], puuid, riot_id)
-    print("..... Import terminé.")
+        # On capture l'etat classe courant et on l'associe au match le plus recent connu.
+        store_rank_snapshot(snapshot_match_id, puuid, riot_id)
+    print(f"[✅][{_current_log_timestamp()}]..... Import terminé.")

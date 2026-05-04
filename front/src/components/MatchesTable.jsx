@@ -1,3 +1,5 @@
+import { MatchDetailPanel } from "./MatchDetailPanel";
+
 function formatDateLabel(value) {
   const date = new Date(value);
   return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
@@ -46,33 +48,6 @@ function groupMatchesByDay(matches) {
   });
 
   return groups;
-}
-
-function TeamRoster({ title, players }) {
-  return (
-    <div className="expanded-team">
-      <h4>{title}</h4>
-      <div className="expanded-roster">
-        {players.map((player) => (
-          <div className="expanded-player" key={`${title}-${player.riot_name}`}>
-            <div className="expanded-player-title">
-              {player.champion_image_url ? (
-                <img className="champion-icon" src={player.champion_image_url} alt={player.champion} />
-              ) : null}
-              <div className="expanded-player-heading">
-                <strong>{player.riot_name}</strong>
-                {player.rank_label ? <span className="rank-badge">{player.rank_label}</span> : null}
-              </div>
-            </div>
-            <span>{player.champion}</span>
-            <small>
-              {player.kills}/{player.deaths}/{player.assists}
-            </small>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function MatchesTable({
@@ -169,7 +144,7 @@ export function MatchesTable({
           disabled={!activeFiltersCount || loading}
           onClick={resetFilters}
         >
-          Réinitialiser
+          Reinitialiser
         </button>
       </div>
 
@@ -179,18 +154,16 @@ export function MatchesTable({
             <div className="day-header">{group.label}</div>
             {group.matches.map((match) => {
               const isSelected = selectedMatchId === match.match_id;
-              const bluePlayers = match.participants.filter((player) => player.team_id === 100);
-              const redPlayers = match.participants.filter((player) => player.team_id === 200);
 
               return (
                 <article
                   key={match.match_id}
-                  className={`match-card ${ match.advanced_stats.game_ended_in_early_surrender ? "surrender": (match.win ? "is-win" : "is-loss")} ${isSelected ? "is-selected" : ""}  `}
+                  className={`match-card ${match.advanced_stats.game_ended_in_early_surrender ? "surrender" : (match.win ? "is-win" : "is-loss")} ${isSelected ? "is-selected" : ""}`}
                   onClick={() => onSelectMatch(match)}
                 >
                   <div className="match-summary">
                     <div className="match-lane">
-                      <span className="result-chip">{match.win ? "Victoire" : "Défaite"}</span>
+                      <span className="result-chip">{match.win ? "Victoire" : "Defaite"}</span>
                       <small style={"align-content:center"}>{formatTime(match.end_time)}</small>
                       <small>{match.queue_name}</small>
                     </div>
@@ -241,8 +214,7 @@ export function MatchesTable({
 
                   {isSelected ? (
                     <div className="match-expanded">
-                      <TeamRoster title="Équipe bleue" players={bluePlayers} />
-                      <TeamRoster title="Équipe rouge" players={redPlayers} />
+                      <MatchDetailPanel match={match} embedded />
                     </div>
                   ) : null}
                 </article>
@@ -251,7 +223,7 @@ export function MatchesTable({
           </div>
         ))}
 
-        {!matches.length && !loading ? <p className="empty-inline">Aucun match local à afficher.</p> : null}
+        {!matches.length && !loading ? <p className="empty-inline">Aucun match local a afficher.</p> : null}
       </div>
 
       <div className="pagination-row">
@@ -261,7 +233,7 @@ export function MatchesTable({
           disabled={!pagination.previous || loading}
           onClick={() => onPageChange(getNextPageNumber(pagination.previous))}
         >
-          Précédent
+          Precedent
         </button>
         <span>Page {pagination.page}</span>
         <button

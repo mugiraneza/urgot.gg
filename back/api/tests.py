@@ -623,6 +623,37 @@ class FrontApiViewTests(TestCase):
         self.assertEqual(participant_ranks["player#euw"], "GOLD II - 47 LP")
         self.assertEqual(participant_ranks["ally#euw"], "SILVER I - 12 LP")
 
+    def test_front_matches_uses_flex_snapshot_for_flex_game_history(self):
+        self.match.queue_id = 440
+        self.match.save(update_fields=["queue_id"])
+        Participant.objects.filter(match=self.match, participant_id=1).update(
+            rank_queue="RANKED_SOLO_5x5",
+            rank_tier="GOLD",
+            rank_division="II",
+            rank_lp=47,
+        )
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_FLEX_SR",
+            tier="PLATINUM",
+            rank_division="IV",
+            league_points=23,
+            wins=8,
+            losses=7,
+        )
+
+        response = self.client.get(reverse("front-matches"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["results"][0]
+        self.assertEqual(result["rank_queue"], "RANKED_FLEX_SR")
+        self.assertEqual(result["rank_label"], "PLATINUM IV - 23 LP")
+        self.assertEqual(result["advanced_stats"]["rank_label"], "PLATINUM IV - 23 LP")
+        participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in result["participants"]}
+        self.assertEqual(participant_ranks["player#euw"], "PLATINUM IV - 23 LP")
+
     def test_front_dashboard_stores_recent_riot_ids(self):
         self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
         self.client.get(reverse("front-dashboard"), {"riot_name": "ally#euw"})
@@ -758,6 +789,112 @@ class RiotImporterAdvancedFieldsTests(TestCase):
         self.assertEqual(participant.secondary_rune_selections, [8444, 8451])
         self.assertEqual(participant.stat_perks["offense"], 5005)
 
+    @patch(
+        "api.services.riot_importer.get_rank_entries_for_puuid",
+        return_value={
+            "RANKED_SOLO_5x5": {
+                "queueType": "RANKED_SOLO_5x5",
+                "tier": "GOLD",
+                "rank": "II",
+                "leaguePoints": 47,
+            },
+            "RANKED_FLEX_SR": {
+                "queueType": "RANKED_FLEX_SR",
+                "tier": "PLATINUM",
+                "rank": "IV",
+                "leaguePoints": 23,
+            },
+        },
+    )
+    def test_insert_participants_prefers_flex_rank_for_flex_match(self, _mock_rank_entries):
+        self.match.queue_id = 440
+        self.match.save(update_fields=["queue_id"])
+
+        insert_participants(
+            self.match.match_id,
+            [
+                {
+                    "participantId": 1,
+                    "puuid": "player-1-player-1-player-1",
+                    "riotIdGameName": "player",
+                    "riotIdTagline": "euw",
+                    "teamId": 100,
+                    "championId": "Urgot",
+                    "championName": "Urgot",
+                    "individualPosition": "TOP",
+                    "role": "SOLO",
+                    "summoner1Id": 4,
+                    "summoner2Id": 12,
+                    "kills": 10,
+                    "deaths": 2,
+                    "assists": 8,
+                    "totalDamageDealtToChampions": 25000,
+                    "damageSelfMitigated": 12000,
+                    "totalHeal": 1000,
+                    "totalDamageShieldedOnTeammates": 2000,
+                    "totalHealsOnTeammates": 1500,
+                    "totalDamageTaken": 18000,
+                    "damageDealtToObjectives": 9000,
+                    "damageDealtToTurrets": 4500,
+                    "largestKillingSpree": 6,
+                    "killingSprees": 3,
+                    "largestMultiKill": 2,
+                    "pentaKills": 0,
+                    "quadraKills": 0,
+                    "turretKills": 2,
+                    "inhibitorKills": 1,
+                    "inhibitorTakedowns": 2,
+                    "turretsLost": 3,
+                    "objectivesStolen": 1,
+                    "objectivesStolenAssists": 1,
+                    "soloKills": 2,
+                    "visionScore": 30,
+                    "wardsPlaced": 12,
+                    "detectorWardsPlaced": 3,
+                    "visionWardsBoughtInGame": 2,
+                    "wardsKilled": 4,
+                    "stealthWardsPlaced": 7,
+                    "totalMinionsKilled": 210,
+                    "neutralMinionsKilled": 12,
+                    "timeCCingOthers": 45,
+                    "item0": 0,
+                    "item1": 0,
+                    "item2": 0,
+                    "item3": 0,
+                    "item4": 0,
+                    "item5": 0,
+                    "item6": 0,
+                    "goldEarned": 15000,
+                    "goldSpent": 14000,
+                    "champLevel": 18,
+                    "champExperience": 18000,
+                    "lane": "TOP",
+                    "championTransform": 0,
+                    "win": True,
+                    "firstBloodKill": False,
+                    "firstTowerKill": True,
+                    "teamPosition": "TOP",
+                    "teamEarlySurrendered": False,
+                    "gameEndedInEarlySurrender": False,
+                    "gameEndedInSurrender": True,
+                    "longestTimeSpentLiving": 800,
+                    "totalTimeCCDealt": 120,
+                    "timePlayed": 1800,
+                    "baitPings": 1,
+                    "dangerPings": 2,
+                    "getBackPings": 3,
+                    "perks": {"styles": [], "statPerks": {}},
+                    "challenges": {},
+                }
+            ],
+        )
+
+        participant = Participant.objects.get(match=self.match, participant_id=1)
+        self.assertEqual(participant.rank_queue, "RANKED_FLEX_SR")
+        self.assertEqual(participant.rank_tier, "PLATINUM")
+        self.assertEqual(participant.rank_division, "IV")
+        self.assertEqual(participant.rank_lp, 23)
+
     @patch("api.services.riot_importer._get_json")
     def test_get_rank_entry_skips_bot_puuid(self, mock_get_json):
         self.assertEqual(get_rank_entry_for_puuid("BOT", "euw1"), {})
@@ -791,24 +928,89 @@ class RiotImporterAdvancedFieldsTests(TestCase):
         self.assertEqual(participant.skill_order, [1, 3, 1])
 
     @patch(
-        "api.services.riot_importer.get_rank_entry_for_puuid",
+        "api.services.riot_importer.get_rank_entries_for_puuid",
         return_value={
-            "queueType": "RANKED_SOLO_5x5",
-            "tier": "PLATINUM",
-            "rank": "IV",
-            "leaguePoints": 23,
-            "wins": 40,
-            "losses": 35,
+            "RANKED_SOLO_5x5": {
+                "queueType": "RANKED_SOLO_5x5",
+                "tier": "PLATINUM",
+                "rank": "IV",
+                "leaguePoints": 23,
+                "wins": 40,
+                "losses": 35,
+            },
+            "RANKED_FLEX_SR": {
+                "queueType": "RANKED_FLEX_SR",
+                "tier": "EMERALD",
+                "rank": "II",
+                "leaguePoints": 61,
+                "wins": 18,
+                "losses": 12,
+            },
         },
     )
-    def test_store_rank_snapshot_persists_current_rank_state(self, _mock_rank):
+    def test_store_rank_snapshot_persists_current_rank_state(self, _mock_rank_entries):
         store_rank_snapshot(self.match.match_id, "player-1", "player#euw")
 
-        snapshot = RankSnapshot.objects.get(match=self.match, puuid="player-1")
-        self.assertEqual(snapshot.queue_type, "RANKED_SOLO_5x5")
-        self.assertEqual(snapshot.tier, "PLATINUM")
-        self.assertEqual(snapshot.rank_division, "IV")
-        self.assertEqual(snapshot.league_points, 23)
+        snapshots = {
+            snapshot.queue_type: snapshot
+            for snapshot in RankSnapshot.objects.filter(match=self.match, puuid="player-1")
+        }
+        self.assertEqual(snapshots["RANKED_SOLO_5x5"].tier, "PLATINUM")
+        self.assertEqual(snapshots["RANKED_SOLO_5x5"].rank_division, "IV")
+        self.assertEqual(snapshots["RANKED_SOLO_5x5"].league_points, 23)
+        self.assertEqual(snapshots["RANKED_FLEX_SR"].tier, "EMERALD")
+        self.assertEqual(snapshots["RANKED_FLEX_SR"].rank_division, "II")
+        self.assertEqual(snapshots["RANKED_FLEX_SR"].league_points, 61)
+
+
+class DetailedMatchStatsRankTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        now_ms = int(timezone.now().timestamp() * 1000)
+        self.match = Match.objects.create(
+            match_id="EUW1_888",
+            game_creation=now_ms,
+            game_end_ts=now_ms,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=440,
+        )
+        Participant.objects.create(
+            match=self.match,
+            participant_id=1,
+            **participant_defaults(
+                puuid="player-1",
+                riot_name="player#euw",
+                team_id=100,
+                rank_queue="RANKED_SOLO_5x5",
+                rank_tier="GOLD",
+                rank_division="II",
+                rank_lp=47,
+            ),
+        )
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_FLEX_SR",
+            tier="PLATINUM",
+            rank_division="IV",
+            league_points=23,
+            wins=8,
+            losses=7,
+        )
+
+    def test_detailed_match_stats_uses_flex_snapshot_for_flex_game_history(self):
+        response = self.client.get(reverse("match-details"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["results"][0]
+        self.assertEqual(result["rank_queue"], "RANKED_FLEX_SR")
+        self.assertEqual(result["rank_label"], "PLATINUM IV - 23 LP")
+        self.assertEqual(result["participants"][0]["rank_label"], "PLATINUM IV - 23 LP")
 
 
 class RepairStoredImportsTests(TestCase):

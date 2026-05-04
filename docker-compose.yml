@@ -44,7 +44,7 @@ services:
     mem_reservation: ${IMPORT_WORKER_MEM_RESERVATION:-256m}
     command: >
       sh -c "
-        python manage.py poll_tracked_imports --interval-minutes 30
+        python manage.py poll_tracked_imports --interval-minutes 15
       "
 
   frontend:

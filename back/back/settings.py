@@ -54,7 +54,7 @@ TEMPLATES = [
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 40
+    'PAGE_SIZE': 25
 }
 
 WSGI_APPLICATION = 'back.wsgi.application'
@@ -83,7 +83,7 @@ ML_MODEL_PATH = BASE_DIR / "ml" / "win_model.pkl"
 #end region ai model
 
 LANGUAGE_CODE = 'fr-fr'
-TIME_ZONE = 'UTC'
+TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "Europe/Paris")
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = 'static/'

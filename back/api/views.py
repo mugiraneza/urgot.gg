@@ -38,8 +38,10 @@ from io import BytesIO
 from pathlib import Path
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from django.conf import settings
+from django.utils import timezone
 from .ml_service import get_model
 import csv
+from datetime import datetime
 matplotlib.use('Agg')
 
 #region variable globale
@@ -91,8 +93,16 @@ RANK_DIVISION_SCORES = {
     "II": 200,
     "I": 300,
 }
+RANK_QUEUE_BY_MATCH_QUEUE = {
+    420: "RANKED_SOLO_5x5",
+    440: "RANKED_FLEX_SR",
+}
 
 #EndOfRegion Variable Global
+
+
+def _current_log_timestamp():
+    return timezone.localtime().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def _store_recent_riot_id(riot_id):
@@ -179,6 +189,48 @@ def _format_rank_label(participant):
     if participant.rank_lp is not None:
         label = f"{label} - {participant.rank_lp} LP"
     return label
+
+
+def _get_latest_rank_snapshots_by_puuid(puuids):
+    latest_snapshots = {}
+    for snapshot in (
+        RankSnapshot.objects.filter(puuid__in=puuids)
+        .select_related("match")
+        .order_by("puuid", "queue_type", "-match__game_creation", "-captured_at")
+    ):
+        latest_snapshots.setdefault(snapshot.puuid, {})
+        latest_snapshots[snapshot.puuid].setdefault(snapshot.queue_type, snapshot)
+    return latest_snapshots
+
+
+def _resolve_rank_for_match(participant, latest_snapshots_by_puuid=None):
+    expected_queue_type = RANK_QUEUE_BY_MATCH_QUEUE.get(participant.match.queue_id)
+    fallback = {
+        "rank_queue": participant.rank_queue,
+        "rank_tier": participant.rank_tier,
+        "rank_division": participant.rank_division,
+        "rank_lp": participant.rank_lp,
+        "rank_label": _format_rank_label(participant),
+    }
+
+    if not expected_queue_type:
+        return fallback
+
+    if participant.rank_queue == expected_queue_type and participant.rank_tier:
+        return fallback
+
+    snapshots_by_queue = (latest_snapshots_by_puuid or {}).get(participant.puuid, {})
+    snapshot = snapshots_by_queue.get(expected_queue_type)
+    if not snapshot:
+        return fallback
+
+    return {
+        "rank_queue": expected_queue_type,
+        "rank_tier": snapshot.tier,
+        "rank_division": snapshot.rank_division,
+        "rank_lp": snapshot.league_points,
+        "rank_label": _build_rank_label(snapshot.tier, snapshot.rank_division, snapshot.league_points),
+    }
 
 
 def _build_rank_icon_name(rank_tier):
@@ -295,7 +347,8 @@ def _build_player_rank_overview(request, filters, latest_ranked_participant):
     }
 
 
-def _serialize_participant_details(request, participant):
+def _serialize_participant_details(request, participant, latest_snapshots_by_puuid=None):
+    resolved_rank = _resolve_rank_for_match(participant, latest_snapshots_by_puuid)
     return {
         "riot_name": participant.riot_name,
         "champion": participant.champion_name,
@@ -306,11 +359,11 @@ def _serialize_participant_details(request, participant):
         "kills": participant.kills,
         "deaths": participant.deaths,
         "assists": participant.assists,
-        "rank_queue": participant.rank_queue,
-        "rank_tier": participant.rank_tier,
-        "rank_division": participant.rank_division,
-        "rank_lp": participant.rank_lp,
-        "rank_label": _format_rank_label(participant),
+        "rank_queue": resolved_rank["rank_queue"],
+        "rank_tier": resolved_rank["rank_tier"],
+        "rank_division": resolved_rank["rank_division"],
+        "rank_lp": resolved_rank["rank_lp"],
+        "rank_label": resolved_rank["rank_label"],
         "vision_score": participant.vision_score,
         "wards_placed": participant.wards_placed,
         "detector_wards_placed": participant.detector_wards_placed,
@@ -368,19 +421,17 @@ def _serialize_participant_details(request, participant):
     }
 
 
-def _build_match_details(request, filters, match_filters=None):
-    match_filters = match_filters or {}
-    user_participants = (
-        Participant.objects.filter(**filters, **match_filters)
-        .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
-        .order_by("-match__game_creation")
-    )
-
-    if not user_participants.exists():
+def _serialize_match_details(request, user_participants):
+    user_participants = list(user_participants)
+    if not user_participants:
         return []
 
     match_ids = [p.match_id for p in user_participants]
-    all_participants = Participant.objects.filter(match_id__in=match_ids)
+    all_participants = list(
+        Participant.objects.filter(match_id__in=match_ids)
+        .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
+    )
+    latest_snapshots_by_puuid = _get_latest_rank_snapshots_by_puuid({p.puuid for p in all_participants})
 
     match_participants_map = defaultdict(list)
     team_kills_map = defaultdict(lambda: defaultdict(int))
@@ -396,6 +447,7 @@ def _build_match_details(request, filters, match_filters=None):
         match_id = match.match_id
         team_kills = team_kills_map[match_id][participant.team_id]
         participants_list = match_participants_map[match_id]
+        resolved_rank = _resolve_rank_for_match(participant, latest_snapshots_by_puuid)
 
         kda_ratio = (participant.kills + participant.assists) / max(1, participant.deaths)
         kill_participation = (participant.kills + participant.assists) / max(1, team_kills)
@@ -405,11 +457,11 @@ def _build_match_details(request, filters, match_filters=None):
             "champion": participant.champion_name,
             "champion_image_url": _build_asset_url(request, "champions", participant.champion_name),
             "position": participant.team_position,
-            "rank_queue": participant.rank_queue,
-            "rank_tier": participant.rank_tier,
-            "rank_division": participant.rank_division,
-            "rank_lp": participant.rank_lp,
-            "rank_label": _format_rank_label(participant),
+            "rank_queue": resolved_rank["rank_queue"],
+            "rank_tier": resolved_rank["rank_tier"],
+            "rank_division": resolved_rank["rank_division"],
+            "rank_lp": resolved_rank["rank_lp"],
+            "rank_label": resolved_rank["rank_label"],
             "win": participant.win,
             "team_id": participant.team_id,
             "queue": match.queue_id,
@@ -433,17 +485,30 @@ def _build_match_details(request, filters, match_filters=None):
             "wards_placed": participant.wards_placed,
             "wards_destroyed": max(0, participant.vision_score - participant.wards_placed),
             "vision_score": participant.vision_score,
-            "advanced_stats": _serialize_participant_details(request, participant),
+            "advanced_stats": _serialize_participant_details(request, participant, latest_snapshots_by_puuid),
             "start_time": datetime.fromtimestamp(match.game_creation / 1000).isoformat(),
             "end_time": datetime.fromtimestamp(match.game_end_ts / 1000).isoformat(),
             "participant_id": participant.participant_id,
             "participants": [
-                _serialize_participant_details(request, teammate)
+                _serialize_participant_details(request, teammate, latest_snapshots_by_puuid)
                 for teammate in participants_list
             ],
         })
 
     return results
+
+
+def _build_match_details(request, filters, match_filters=None):
+    match_filters = match_filters or {}
+    user_participants = (
+        Participant.objects.filter(**filters, **match_filters)
+        .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
+        .order_by("-match__game_creation")
+    )
+
+    if not user_participants.exists():
+        return []
+    return _serialize_match_details(request, user_participants)
 
 
 def _build_champion_pool(request, filters):
@@ -837,10 +902,14 @@ class FrontMatchesView(views.APIView):
         filters, error_response = _get_player_filters(request)
         if error_response:
             return error_response
-
-        results = _build_match_details(request, filters, _get_match_list_filters(request))
         paginator = PageNumberPagination()
-        paginated_results = paginator.paginate_queryset(results, request)
+        user_participants = (
+            Participant.objects.filter(**filters, **_get_match_list_filters(request))
+            .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
+            .order_by("-match__game_creation")
+        )
+        paginated_participants = paginator.paginate_queryset(user_participants, request)
+        paginated_results = _serialize_match_details(request, paginated_participants)
         response = paginator.get_paginated_response(paginated_results)
         response.data["source"] = "local_db"
         return response
@@ -892,13 +961,13 @@ class TriggerMatchImportViewSet(views.APIView):
                 try:
                     run_match_import(riot_id, region)
                 except Exception as exc:
-                    print(f"[!] Import echoue pour {riot_id} ({region}): {exc}")
+                    print(f"[❌][{_current_log_timestamp()}] Import echoue pour {riot_id} ({region}): {exc}")
                 finally:
                     running_imports.pop(riot_id, None)
             thread = threading.Thread(target=import_task, daemon=True)
             running_imports[riot_id] = thread
             thread.start()
-            return Response({"message": f"Import lancé pour {riot_id} ({region})"}, status=202)
+            return Response({"message": f"[✅][{_current_log_timestamp()}] Import lancé pour {riot_id} ({region})"}, status=202)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1012,7 +1081,7 @@ class PositionStatsView(views.APIView):
             return Response({"error": "Veuillez fournir 'puuid' ou 'riot_name'"}, status=400)
 
         # Date limite : 60 jours en arrière
-        cutoff_date = datetime.now() - timedelta(days=60)
+        cutoff_date = timezone.now() - timedelta(days=60)
 
         # Récupérer les participants du joueur
         filters = {}
@@ -1196,65 +1265,92 @@ class DetailedMatchStatsView(views.APIView):
 
         if not user_participants.exists():
             return Response({"message": "Aucun match trouvé."}, status=200)
-
-        match_ids = [p.match_id for p in user_participants]
-
-        # Récupère tous les participants des matchs concernés
-        all_participants = Participant.objects.filter(match_id__in=match_ids)
-
-        # Regroupement pour éviter les requêtes dans la boucle
-        match_participants_map = defaultdict(list)
-        team_kills_map = defaultdict(lambda: defaultdict(int))
-
-        for p in all_participants:
-            match_participants_map[p.match_id].append(p)
-            team_kills_map[p.match_id][p.team_id] += p.kills
-
-        results = []
-
-        for p in user_participants:
-            match = p.match
-            match_id = match.match_id
-            team_kills = team_kills_map[match_id][p.team_id]
-            participants_list = match_participants_map[match_id]
-
-            kda_ratio = (p.kills + p.assists) / max(1, p.deaths)
-            kill_participation = (p.kills + p.assists) / max(1, team_kills)
-
-            results.append({
-                "match_id": match_id,
-                "champion": p.champion_name,
-                "position": p.team_position,
-                "summoner_spells": [p.summoner1_id, p.summoner2_id],
-                "kills": p.kills,
-                "deaths": p.deaths,
-                "assists": p.assists,
-                "kda_ratio": round(kda_ratio, 2),
-                "kill_participation": round(kill_participation * 100, 1),
-                "items": [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5, p.item6],
-                "wards_placed": p.wards_placed,
-                "wards_destroyed": max(0, p.vision_score - p.wards_placed),
-                "vision_score": p.vision_score,
-                "start_time": datetime.fromtimestamp(match.game_creation / 1000).isoformat(),
-                "end_time": datetime.fromtimestamp(match.game_end_ts / 1000).isoformat(),
-                "participant_id": p.participant_id,
-                "participants": [
-                    {
-                        "riot_name": mp.riot_name,
-                        "champion": mp.champion_name,
-                        "team_id": mp.team_id,
-                        "kills": mp.kills,
-                        "deaths": mp.deaths,
-                        "assists": mp.assists
-                    }
-                    for mp in participants_list
-                ]
-            })
-
-        # Pagination DRF
         paginator = PageNumberPagination()
-        paginated_results = paginator.paginate_queryset(results, request)
-        return paginator.get_paginated_response(paginated_results)
+        paginated_participants = paginator.paginate_queryset(
+            user_participants.order_by("-match__game_creation"),
+            request,
+        )
+        results = _serialize_match_details(request, paginated_participants)
+        for result in results:
+            result.pop("advanced_stats", None)
+            result.pop("champion_image_url", None)
+            result.pop("queue", None)
+            result.pop("queue_name", None)
+            result.pop("game_duration", None)
+            result.pop("win", None)
+            result.pop("team_id", None)
+            result.pop("items", None)
+            for participant in result["participants"]:
+                participant.pop("champion_image_url", None)
+                participant.pop("position", None)
+                participant.pop("lane", None)
+                participant.pop("vision_score", None)
+                participant.pop("wards_placed", None)
+                participant.pop("detector_wards_placed", None)
+                participant.pop("vision_wards_bought_in_game", None)
+                participant.pop("wards_killed", None)
+                participant.pop("stealth_wards_placed", None)
+                participant.pop("vision_score_advantage_lane_opponent", None)
+                participant.pop("total_damage_dealt_champs", None)
+                participant.pop("damage_self_mitigated", None)
+                participant.pop("total_heal", None)
+                participant.pop("total_damage_shielded_on_teammates", None)
+                participant.pop("total_heals_on_teammates", None)
+                participant.pop("total_damage_taken", None)
+                participant.pop("damage_dealt_to_objectives", None)
+                participant.pop("damage_dealt_to_turrets", None)
+                participant.pop("turret_kills", None)
+                participant.pop("inhibitor_kills", None)
+                participant.pop("inhibitor_takedowns", None)
+                participant.pop("turrets_lost", None)
+                participant.pop("objectives_stolen", None)
+                participant.pop("objectives_stolen_assists", None)
+                participant.pop("solo_kills", None)
+                participant.pop("largest_killing_spree", None)
+                participant.pop("killing_sprees", None)
+                participant.pop("largest_multi_kill", None)
+                participant.pop("gold_earned", None)
+                participant.pop("gold_spent", None)
+                participant.pop("gold_per_minute", None)
+                participant.pop("damage_per_minute", None)
+                participant.pop("total_minions_killed", None)
+                participant.pop("neutral_minions_killed", None)
+                participant.pop("lane_minions_first_10_minutes", None)
+                participant.pop("jungle_cs_before_10_minutes", None)
+                participant.pop("time_played", None)
+                participant.pop("longest_time_spent_living", None)
+                participant.pop("time_ccing_others", None)
+                participant.pop("total_time_cc_dealt", None)
+                participant.pop("champ_level", None)
+                participant.pop("champ_experience", None)
+                participant.pop("champion_transform", None)
+                participant.pop("team_early_surrendered", None)
+                participant.pop("game_ended_in_early_surrender", None)
+                participant.pop("game_ended_in_surrender", None)
+                participant.pop("win", None)
+                participant.pop("first_blood_kill", None)
+                participant.pop("first_tower_kill", None)
+                participant.pop("summoner1_id", None)
+                participant.pop("summoner2_id", None)
+                participant.pop("item0", None)
+                participant.pop("item1", None)
+                participant.pop("item2", None)
+                participant.pop("item3", None)
+                participant.pop("item4", None)
+                participant.pop("item5", None)
+                participant.pop("item6", None)
+                participant.pop("bait_pings", None)
+                participant.pop("danger_pings", None)
+                participant.pop("get_back_pings", None)
+                participant.pop("ping_stats", None)
+                participant.pop("perks", None)
+                participant.pop("primary_rune_style", None)
+                participant.pop("secondary_rune_style", None)
+                participant.pop("primary_rune_selections", None)
+                participant.pop("secondary_rune_selections", None)
+                participant.pop("stat_perks", None)
+                participant.pop("skill_order", None)
+        return paginator.get_paginated_response(results)
     
 class RoleChampionStatsView(views.APIView):
     """

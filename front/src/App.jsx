@@ -3,7 +3,6 @@ import { fetchFrontDashboard, fetchFrontMatches, fetchRecentRiotIds, triggerMatc
 import { AppShell } from "./components/AppShell";
 import { SearchPanel } from "./components/SearchPanel";
 import { MatchesTable } from "./components/MatchesTable";
-import { MatchDetailPanel } from "./components/MatchDetailPanel";
 import { StatsOverview } from "./components/StatsOverview";
 import { ChampionStatsTable } from "./components/ChampionStatsTable";
 import { ChartCard } from "./components/ChartCard";
@@ -247,7 +246,7 @@ export function App() {
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
       setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
       setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
-      await loadRecentRiotIds();
+      loadRecentRiotIds();
     } catch (loadError) {
       setError(loadError.message || "Impossible de charger le tableau de bord.");
     } finally {
@@ -316,7 +315,7 @@ export function App() {
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
       setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
       setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
-      await loadRecentRiotIds();
+      loadRecentRiotIds();
     } catch (refreshError) {
       setError(refreshError.message || "Impossible d'actualiser les données.");
     } finally {
@@ -373,7 +372,6 @@ export function App() {
                 ],
               }}
             />
-            <MatchDetailPanel match={activeMatch} />
             <ChartCard
               title="Répartition des parties"
               subtitle="Base locale"
