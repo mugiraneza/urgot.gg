@@ -123,6 +123,32 @@ def _get_recent_riot_ids():
     return cache.get(RECENT_RIOT_IDS_CACHE_KEY, [])
 
 
+def _resolve_puuid_from_riot_name(riot_name):
+    normalized_riot_name = (riot_name or "").strip()
+    if not normalized_riot_name:
+        return None
+
+    latest_participant_puuid = (
+        Participant.objects.filter(riot_name__iexact=normalized_riot_name)
+        .order_by("-match__game_creation")
+        .values_list("puuid", flat=True)
+        .first()
+    )
+    if latest_participant_puuid:
+        return latest_participant_puuid
+
+    latest_snapshot_puuid = (
+        RankSnapshot.objects.filter(riot_name__iexact=normalized_riot_name)
+        .order_by("-match__game_creation", "-captured_at")
+        .values_list("puuid", flat=True)
+        .first()
+    )
+    if latest_snapshot_puuid:
+        return latest_snapshot_puuid
+
+    return None
+
+
 def _get_player_filters(request):
     puuid = request.GET.get("puuid")
     riot_name = request.GET.get("riot_name")
@@ -135,7 +161,11 @@ def _get_player_filters(request):
         filters["puuid"] = puuid
     if riot_name:
         _store_recent_riot_id(riot_name)
-        filters["riot_name__iexact"] = riot_name
+        resolved_puuid = _resolve_puuid_from_riot_name(riot_name)
+        if resolved_puuid:
+            filters["puuid"] = resolved_puuid
+        elif not puuid:
+            filters["riot_name__iexact"] = riot_name
     return filters, None
 
 
@@ -245,9 +275,10 @@ def _build_player_profile_icon_url(participant):
         return None
 
     platform_region = get_platform_region(participant.match.match_id)
-    summoner_profile = get_summoner_profile_by_puuid(participant.puuid, platform_region)
+    # Keep dashboard responses local and fast: only use cached remote metadata.
+    summoner_profile = get_summoner_profile_by_puuid(participant.puuid, platform_region, allow_network=False)
     profile_icon_id = summoner_profile.get("profileIconId")
-    return build_profile_icon_url(profile_icon_id)
+    return build_profile_icon_url(profile_icon_id, allow_network=False)
 
 
 def _build_rank_summary(request, tier, rank_division, league_points):

@@ -222,30 +222,57 @@ export function App() {
 
     try {
       const matchParams = options.remoteFilters ? buildMatchFilterParams(nextMatchFilters) : {};
-      const [matchesResponse, dashboardResponse] = await Promise.all([
+      const [matchesResult, dashboardResult] = await Promise.allSettled([
         fetchFrontMatches({ ...queryParams, ...matchParams, page: nextPage }),
         fetchFrontDashboard(queryParams),
       ]);
 
-      const matchResults = matchesResponse.results || [];
-      const visibleMatches = options.remoteFilters ? matchResults : filterMatchesLocally(matchResults, nextMatchFilters);
-      if (!options.remoteFilters) {
-        setPageMatches(matchResults);
+      if (matchesResult.status === "fulfilled") {
+        const matchesResponse = matchesResult.value;
+        const matchResults = matchesResponse.results || [];
+        const visibleMatches = options.remoteFilters ? matchResults : filterMatchesLocally(matchResults, nextMatchFilters);
+
+        if (!options.remoteFilters) {
+          setPageMatches(matchResults);
+        }
+        setRemoteFilteredMatches(Boolean(options.remoteFilters));
+        setMatches(visibleMatches);
+        setMatchesPagination({
+          next: matchesResponse.next,
+          previous: matchesResponse.previous,
+          count: matchesResponse.count || 0,
+          page: nextPage,
+        });
+        selectVisibleMatch(visibleMatches);
+      } else {
+        setMatches([]);
+        setPageMatches([]);
+        setMatchesPagination({ next: null, previous: null, count: 0, page: nextPage });
       }
-      setRemoteFilteredMatches(Boolean(options.remoteFilters));
-      setMatches(visibleMatches);
-      setMatchesPagination({
-        next: matchesResponse.next,
-        previous: matchesResponse.previous,
-        count: matchesResponse.count || 0,
-        page: nextPage,
-      });
-      selectVisibleMatch(visibleMatches);
-      setGlobalStats(dashboardResponse.overview || null);
-      setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
-      setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
-      setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
-      setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
+
+      if (dashboardResult.status === "fulfilled") {
+        const dashboardResponse = dashboardResult.value;
+        setGlobalStats(dashboardResponse.overview || null);
+        setChampionStats(Array.isArray(dashboardResponse.champions) ? dashboardResponse.champions : []);
+        setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
+        setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
+        setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
+      } else {
+        setGlobalStats(null);
+        setChampionStats([]);
+        setModeStats([]);
+        setCsEvolution([]);
+        setLpEvolution([]);
+      }
+
+      if (matchesResult.status === "rejected" && dashboardResult.status === "rejected") {
+        throw new Error(matchesResult.reason?.message || dashboardResult.reason?.message || "Impossible de charger les donnees.");
+      }
+
+      if (dashboardResult.status === "rejected") {
+        setInfo("Les matchs ont ete charges, mais le dashboard n'a pas pu etre affiche.");
+      }
+
       loadRecentRiotIds();
     } catch (loadError) {
       setError(loadError.message || "Impossible de charger le tableau de bord.");

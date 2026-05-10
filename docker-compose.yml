@@ -16,6 +16,18 @@ services:
       - ./back:/app
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 8000)); s.close()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     mem_limit: ${API_MEM_LIMIT:-768m}
     mem_reservation: ${API_MEM_RESERVATION:-512m}
     command: >
@@ -30,7 +42,8 @@ services:
       dockerfile: Dockerfile
     container_name: urgot-import-worker
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret-key-change-me}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
@@ -53,8 +66,10 @@ services:
       dockerfile: Dockerfile
     container_name: urgot-frontend
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "80:80"
+    restart: unless-stopped
     mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
     mem_reservation: ${FRONTEND_MEM_RESERVATION:-128m}

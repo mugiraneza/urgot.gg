@@ -284,7 +284,7 @@ def get_rank_entry_for_puuid(
     return next(iter(entries_by_queue.values()), {})
 
 
-def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
+def get_summoner_profile_by_puuid(puuid: str, platform_region: str, allow_network: bool = True) -> Dict:
     if not RIOT_API_KEY or not puuid or not platform_region:
         return {}
 
@@ -292,6 +292,9 @@ def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
     cached_profile = SUMMONER_CACHE.get(cache_key)
     if cached_profile is not None:
         return cached_profile
+
+    if not allow_network:
+        return {}
 
     try:
         data = _get_json(
@@ -303,11 +306,14 @@ def get_summoner_profile_by_puuid(puuid: str, platform_region: str) -> Dict:
     return SUMMONER_CACHE.set(cache_key, data if isinstance(data, dict) else {})
 
 
-def get_latest_data_dragon_version() -> Optional[str]:
+def get_latest_data_dragon_version(allow_network: bool = True) -> Optional[str]:
     global DATA_DRAGON_VERSION
 
     if DATA_DRAGON_VERSION:
         return DATA_DRAGON_VERSION
+
+    if not allow_network:
+        return None
 
     try:
         response = requests.get(f"{DATA_DRAGON_BASE_URL}/api/versions.json", timeout=10)
@@ -321,11 +327,11 @@ def get_latest_data_dragon_version() -> Optional[str]:
     return DATA_DRAGON_VERSION
 
 
-def build_profile_icon_url(profile_icon_id: Optional[int]) -> Optional[str]:
+def build_profile_icon_url(profile_icon_id: Optional[int], allow_network: bool = True) -> Optional[str]:
     if profile_icon_id is None:
         return None
 
-    version = get_latest_data_dragon_version()
+    version = get_latest_data_dragon_version(allow_network=allow_network)
     if not version:
         return None
 

@@ -598,7 +598,7 @@ class FrontApiViewTests(TestCase):
             response.json()["overview"]["player_profile_icon_url"],
             "https://ddragon.leagueoflegends.com/cdn/15.1.1/img/profileicon/1234.png",
         )
-        get_summoner_profile_mock.assert_called_once_with("player-1", "euw1")
+        get_summoner_profile_mock.assert_called_once_with("player-1", "euw1", allow_network=False)
 
     def test_front_matches_reads_local_db(self):
         response = self.client.get(reverse("front-matches"), {"riot_name": "player#euw"})
@@ -653,6 +653,39 @@ class FrontApiViewTests(TestCase):
         self.assertEqual(result["advanced_stats"]["rank_label"], "PLATINUM IV - 23 LP")
         participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in result["participants"]}
         self.assertEqual(participant_ranks["player#euw"], "PLATINUM IV - 23 LP")
+
+    def test_front_matches_resolves_puuid_from_riot_name_and_returns_renamed_history(self):
+        older_match = Match.objects.create(
+            match_id="EUW1_6",
+            game_creation=self.match.game_creation - 1000,
+            game_end_ts=self.match.game_end_ts - 1000,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=420,
+        )
+        Participant.objects.create(
+            match=older_match,
+            participant_id=1,
+            **participant_defaults(
+                puuid="player-1",
+                riot_name="oldplayer#euw",
+                team_id=100,
+                champion=self.champion,
+            ),
+        )
+
+        response = self.client.get(reverse("front-matches"), {"riot_name": "oldplayer#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(
+            [result["match_id"] for result in payload["results"]],
+            ["EUW1_4", "EUW1_6"],
+        )
 
     def test_front_dashboard_stores_recent_riot_ids(self):
         self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
