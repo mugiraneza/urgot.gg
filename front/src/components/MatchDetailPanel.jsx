@@ -293,3 +293,31 @@ export function MatchDetailPanel({ match, embedded = false }) {
     </WrapperTag>
   );
 }
+
+export function MatchDetailPanelLoading({ embedded = false }) {
+  const WrapperTag = embedded ? "div" : "aside";
+  const wrapperClassName = embedded ? "match-detail-tabs" : "card detail-panel";
+
+  return (
+    <WrapperTag className={wrapperClassName}>
+      <div className="detail-loading-state">
+        <p className="eyebrow">Detail</p>
+        <p className="muted">Chargement des statistiques avancees de la partie...</p>
+      </div>
+    </WrapperTag>
+  );
+}
+
+export function MatchDetailPanelError({ message, embedded = false }) {
+  const WrapperTag = embedded ? "div" : "aside";
+  const wrapperClassName = embedded ? "match-detail-tabs" : "card detail-panel";
+
+  return (
+    <WrapperTag className={wrapperClassName}>
+      <div className="detail-loading-state">
+        <p className="eyebrow">Detail</p>
+        <p className="muted">{message || "Impossible de charger les details de cette partie."}</p>
+      </div>
+    </WrapperTag>
+  );
+}

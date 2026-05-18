@@ -617,11 +617,8 @@ class FrontApiViewTests(TestCase):
             "http://testserver/api/assets/items/items/1001.png",
         )
         self.assertEqual(payload["results"][0]["rank_label"], "GOLD II - 47 LP")
-        self.assertIn("advanced_stats", payload["results"][0])
-        self.assertIn("skill_order", payload["results"][0]["advanced_stats"])
-        participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in payload["results"][0]["participants"]}
-        self.assertEqual(participant_ranks["player#euw"], "GOLD II - 47 LP")
-        self.assertEqual(participant_ranks["ally#euw"], "SILVER I - 12 LP")
+        self.assertNotIn("advanced_stats", payload["results"][0])
+        self.assertNotIn("participants", payload["results"][0])
 
     def test_front_matches_uses_flex_snapshot_for_flex_game_history(self):
         self.match.queue_id = 440
@@ -650,9 +647,23 @@ class FrontApiViewTests(TestCase):
         result = response.json()["results"][0]
         self.assertEqual(result["rank_queue"], "RANKED_FLEX_SR")
         self.assertEqual(result["rank_label"], "PLATINUM IV - 23 LP")
-        self.assertEqual(result["advanced_stats"]["rank_label"], "PLATINUM IV - 23 LP")
-        participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in result["participants"]}
-        self.assertEqual(participant_ranks["player#euw"], "PLATINUM IV - 23 LP")
+        self.assertEqual(result["game_ended_in_early_surrender"], False)
+
+    def test_front_match_detail_returns_advanced_stats_and_participants(self):
+        response = self.client.get(
+            reverse("front-match-detail", kwargs={"match_id": self.match.match_id}),
+            {"riot_name": "player#euw"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "local_db")
+        self.assertEqual(payload["match_id"], "EUW1_4")
+        self.assertIn("advanced_stats", payload)
+        self.assertIn("skill_order", payload["advanced_stats"])
+        participant_ranks = {participant["riot_name"]: participant["rank_label"] for participant in payload["participants"]}
+        self.assertEqual(participant_ranks["player#euw"], "GOLD II - 47 LP")
+        self.assertEqual(participant_ranks["ally#euw"], "SILVER I - 12 LP")
 
     def test_front_matches_resolves_puuid_from_riot_name_and_returns_renamed_history(self):
         older_match = Match.objects.create(

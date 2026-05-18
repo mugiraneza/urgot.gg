@@ -39,6 +39,7 @@ from pathlib import Path
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from django.conf import settings
 from django.utils import timezone
+from django.db.models import Sum
 from .ml_service import get_model
 import csv
 from datetime import datetime
@@ -542,28 +543,82 @@ def _build_match_details(request, filters, match_filters=None):
     return _serialize_match_details(request, user_participants)
 
 
-def _build_champion_pool(request, filters):
-    participants = Participant.objects.filter(
-        **filters, match__queue_id__in=[400, 420, 430, 440]
-    ).select_related("match", "champion")
+def _build_match_summary(match_details):
+    summary_fields = {
+        "match_id",
+        "champion",
+        "champion_image_url",
+        "position",
+        "rank_queue",
+        "rank_tier",
+        "rank_division",
+        "rank_lp",
+        "rank_label",
+        "win",
+        "team_id",
+        "queue",
+        "queue_name",
+        "game_duration",
+        "kills",
+        "deaths",
+        "assists",
+        "kda_ratio",
+        "kill_participation",
+        "items",
+        "vision_score",
+        "start_time",
+        "end_time",
+        "participant_id",
+    }
 
-    if not participants.exists():
+    summaries = []
+    for result in match_details:
+        summary = {key: result.get(key) for key in summary_fields}
+        summary["game_ended_in_early_surrender"] = (
+            result.get("advanced_stats", {}) or {}
+        ).get("game_ended_in_early_surrender")
+        summaries.append(summary)
+    return summaries
+
+
+def _build_champion_pool(request, filters):
+    participants = list(
+        Participant.objects.filter(**filters, match__queue_id__in=[400, 420, 430, 440]).values(
+            "match_id",
+            "team_id",
+            "team_position",
+            "champion_name",
+            "win",
+            "kills",
+            "deaths",
+            "assists",
+            "total_damage_dealt_champs",
+            "total_minions_killed",
+            "neutral_minions_killed",
+            "time_played",
+        )
+    )
+
+    if not participants:
         return []
 
-    match_ids = [p.match_id for p in participants]
-    all_participants = Participant.objects.filter(match_id__in=match_ids)
-    team_kills_map = defaultdict(lambda: defaultdict(int))
-    for participant in all_participants:
-        team_kills_map[participant.match_id][participant.team_id] += participant.kills
+    match_ids = [participant["match_id"] for participant in participants]
+    team_kills_map = defaultdict(dict)
+    for row in (
+        Participant.objects.filter(match_id__in=match_ids)
+        .values("match_id", "team_id")
+        .annotate(team_kills=Sum("kills"))
+    ):
+        team_kills_map[row["match_id"]][row["team_id"]] = row["team_kills"] or 0
 
     stats = {}
     for participant in participants:
-        role = (participant.team_position or "").upper()
+        role = (participant["team_position"] or "").upper()
         if role in ["", "UNKNOWN"]:
             continue
 
         champion_stats = stats.setdefault(
-            participant.champion_name,
+            participant["champion_name"],
             {
                 "games": 0,
                 "wins": 0,
@@ -577,17 +632,17 @@ def _build_champion_pool(request, filters):
             },
         )
         champion_stats["games"] += 1
-        champion_stats["wins"] += int(participant.win)
-        champion_stats["total_kills"] += participant.kills
-        champion_stats["total_deaths"] += participant.deaths
-        champion_stats["total_assists"] += participant.assists
-        champion_stats["total_damage"] += participant.total_damage_dealt_champs
-        champion_stats["total_minions"] += participant.total_minions_killed + participant.neutral_minions_killed
-        champion_stats["total_time"] += participant.time_played
+        champion_stats["wins"] += int(participant["win"])
+        champion_stats["total_kills"] += participant["kills"]
+        champion_stats["total_deaths"] += participant["deaths"]
+        champion_stats["total_assists"] += participant["assists"]
+        champion_stats["total_damage"] += participant["total_damage_dealt_champs"]
+        champion_stats["total_minions"] += participant["total_minions_killed"] + participant["neutral_minions_killed"]
+        champion_stats["total_time"] += participant["time_played"]
 
-        team_kills = team_kills_map[participant.match.match_id][participant.team_id]
+        team_kills = team_kills_map[participant["match_id"]].get(participant["team_id"], 0)
         if team_kills > 0:
-            champion_stats["total_kp_ratio"] += (participant.kills + participant.assists) / team_kills
+            champion_stats["total_kp_ratio"] += (participant["kills"] + participant["assists"]) / team_kills
 
     result = []
     for champion, data in stats.items():
@@ -611,7 +666,24 @@ def _build_champion_pool(request, filters):
 
 def _build_global_overview(request, filters):
     participants = list(
-        Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+        Participant.objects.filter(**filters)
+        .select_related("match")
+        .only(
+            "puuid",
+            "riot_name",
+            "team_id",
+            "win",
+            "rank_queue",
+            "rank_tier",
+            "rank_division",
+            "rank_lp",
+            "time_played",
+            "match_id",
+            "match__match_id",
+            "match__game_creation",
+            "match__game_end_ts",
+        )
+        .order_by("match__game_creation")
     )
     if not participants:
         return None
@@ -690,8 +762,12 @@ def _build_global_overview(request, filters):
 
 
 def _build_mode_stats(filters):
-    participants = Participant.objects.filter(**filters).select_related("match")
-    if not participants.exists():
+    participants = list(
+        Participant.objects.filter(**filters)
+        .select_related("match")
+        .only("win", "time_played", "match__queue_id")
+    )
+    if not participants:
         return []
 
     mode_stats = defaultdict(
@@ -741,10 +817,21 @@ def _build_mode_stats(filters):
 
 
 def _build_cs_evolution(filters):
-    participants = (
-        Participant.objects.filter(**filters).select_related("match").order_by("match__game_creation")
+    participants = list(
+        Participant.objects.filter(**filters)
+        .select_related("match")
+        .only(
+            "champion_name",
+            "team_position",
+            "time_played",
+            "total_minions_killed",
+            "neutral_minions_killed",
+            "match__match_id",
+            "match__game_creation",
+        )
+        .order_by("match__game_creation")
     )
-    if not participants.exists():
+    if not participants:
         return []
 
     result = []
@@ -941,7 +1028,38 @@ class FrontMatchesView(views.APIView):
         )
         paginated_participants = paginator.paginate_queryset(user_participants, request)
         paginated_results = _serialize_match_details(request, paginated_participants)
-        response = paginator.get_paginated_response(paginated_results)
+        response = paginator.get_paginated_response(_build_match_summary(paginated_results))
+        response.data["source"] = "local_db"
+        return response
+
+
+class FrontMatchDetailView(views.APIView):
+    """
+    Endpoint frontend local-only: detail d'un match unique.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Retourne le detail complet d'un match frontend depuis la base locale.",
+        manual_parameters=[
+            openapi.Parameter("puuid", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="PUUID du joueur"),
+            openapi.Parameter("riot_name", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Nom Riot du joueur"),
+        ],
+    )
+    def get(self, request, match_id):
+        filters, error_response = _get_player_filters(request)
+        if error_response:
+            return error_response
+
+        user_participants = (
+            Participant.objects.filter(**filters, match_id=match_id)
+            .select_related("match", "champion", "item0", "item1", "item2", "item3", "item4", "item5", "item6")
+            .order_by("-match__game_creation")
+        )
+        results = _serialize_match_details(request, user_participants[:1])
+        if not results:
+            return Response({"error": "Match introuvable."}, status=404)
+
+        response = Response(results[0], status=200)
         response.data["source"] = "local_db"
         return response
 

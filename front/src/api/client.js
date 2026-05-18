@@ -32,6 +32,10 @@ export function fetchFrontMatches(params) {
   return request("/front/matches/", params);
 }
 
+export function fetchFrontMatchDetail(matchId, params) {
+  return request(`/front/matches/${matchId}/`, params);
+}
+
 export function fetchFrontDashboard(params) {
   return request("/front/dashboard/", params);
 }

@@ -1,4 +1,4 @@
-import { MatchDetailPanel } from "./MatchDetailPanel";
+import { MatchDetailPanel, MatchDetailPanelError, MatchDetailPanelLoading } from "./MatchDetailPanel";
 
 function formatDateLabel(value) {
   const date = new Date(value);
@@ -55,6 +55,9 @@ export function MatchesTable({
   pagination,
   selectedMatchId,
   onSelectMatch,
+  selectedMatchDetail,
+  detailLoading,
+  detailError,
   onPageChange,
   loading,
   filters,
@@ -158,7 +161,7 @@ export function MatchesTable({
               return (
                 <article
                   key={match.match_id}
-                  className={`match-card ${match.advanced_stats.game_ended_in_early_surrender ? "surrender" : (match.win ? "is-win" : "is-loss")} ${isSelected ? "is-selected" : ""}`}
+                  className={`match-card ${match.game_ended_in_early_surrender ? "surrender" : (match.win ? "is-win" : "is-loss")} ${isSelected ? "is-selected" : ""}`}
                   onClick={() => onSelectMatch(match)}
                 >
                   <div className="match-summary">
@@ -214,7 +217,9 @@ export function MatchesTable({
 
                   {isSelected ? (
                     <div className="match-expanded">
-                      <MatchDetailPanel match={match} embedded />
+                      {detailLoading ? <MatchDetailPanelLoading embedded /> : null}
+                      {!detailLoading && detailError ? <MatchDetailPanelError embedded message={detailError} /> : null}
+                      {!detailLoading && !detailError && selectedMatchDetail ? <MatchDetailPanel match={selectedMatchDetail} embedded /> : null}
                     </div>
                   ) : null}
                 </article>

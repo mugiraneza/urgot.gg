@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { fetchFrontDashboard, fetchFrontMatches, fetchRecentRiotIds, triggerMatchImport } from "./api/client";
+import { fetchFrontDashboard, fetchFrontMatchDetail, fetchFrontMatches, fetchRecentRiotIds, triggerMatchImport } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { SearchPanel } from "./components/SearchPanel";
 import { MatchesTable } from "./components/MatchesTable";
@@ -72,6 +72,9 @@ function filterMatchesLocally(matchList, filters) {
 
 const RECENT_RIOT_IDS_STORAGE_KEY = "urgot_recent_riot_ids";
 const RECENT_RIOT_IDS_LIMIT = 8;
+const DASHBOARD_CACHE_PREFIX = "urgot_dashboard_cache_v1";
+const MATCHES_CACHE_PREFIX = "urgot_matches_cache_v1";
+const MATCH_DETAIL_CACHE_PREFIX = "urgot_match_detail_cache_v1";
 
 function normalizeRecentRiotIds(values) {
   const recentIds = Array.isArray(values) ? values : [];
@@ -122,6 +125,62 @@ function writeRecentRiotIdsToStorage(values) {
   }
 }
 
+function safeReadJson(key) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(key);
+    return rawValue ? JSON.parse(rawValue) : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeWriteJson(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures and keep the in-memory state.
+  }
+}
+
+function buildQueryCacheKey(queryParams) {
+  if (!queryParams) {
+    return "";
+  }
+
+  return Object.entries(queryParams)
+    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+    .map(([key, value]) => `${key}:${value}`)
+    .join("|");
+}
+
+function buildMatchesCacheKey(queryParams, page, filters, remoteFilters) {
+  return [
+    MATCHES_CACHE_PREFIX,
+    buildQueryCacheKey(queryParams),
+    `page:${page}`,
+    `queue:${filters.queue || ""}`,
+    `champion:${filters.championName || ""}`,
+    `position:${filters.position || ""}`,
+    `remote:${remoteFilters ? "1" : "0"}`,
+  ].join("|");
+}
+
+function buildDashboardCacheKey(queryParams) {
+  return [DASHBOARD_CACHE_PREFIX, buildQueryCacheKey(queryParams)].join("|");
+}
+
+function buildMatchDetailCacheKey(queryParams, matchId) {
+  return [MATCH_DETAIL_CACHE_PREFIX, buildQueryCacheKey(queryParams), matchId].join("|");
+}
+
 export function App() {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [loading, setLoading] = useState(false);
@@ -132,6 +191,9 @@ export function App() {
   const [remoteFilteredMatches, setRemoteFilteredMatches] = useState(false);
   const [matchesPagination, setMatchesPagination] = useState({ next: null, previous: null, count: 0, page: 1 });
   const [selectedMatchId, setSelectedMatchId] = useState(null);
+  const [matchDetailsById, setMatchDetailsById] = useState({});
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [globalStats, setGlobalStats] = useState(null);
   const [championStats, setChampionStats] = useState([]);
   const [modeStats, setModeStats] = useState([]);
@@ -206,6 +268,79 @@ export function App() {
     });
   }
 
+  function applyCachedMatches(cacheEntry) {
+    if (!cacheEntry) {
+      return false;
+    }
+
+    const cachedResults = Array.isArray(cacheEntry.matches) ? cacheEntry.matches : [];
+    const cachedPageMatches = Array.isArray(cacheEntry.pageMatches) ? cacheEntry.pageMatches : cachedResults;
+
+    setPageMatches(cachedPageMatches);
+    setRemoteFilteredMatches(Boolean(cacheEntry.remoteFilteredMatches));
+    setMatches(cachedResults);
+    setMatchesPagination(
+      cacheEntry.pagination || { next: null, previous: null, count: cachedResults.length, page: 1 },
+    );
+    selectVisibleMatch(cachedResults);
+    return true;
+  }
+
+  function applyCachedDashboard(cacheEntry) {
+    if (!cacheEntry) {
+      return false;
+    }
+
+    setGlobalStats(cacheEntry.overview || null);
+    setChampionStats(Array.isArray(cacheEntry.champions) ? cacheEntry.champions : []);
+    setModeStats(Array.isArray(cacheEntry.modes) ? cacheEntry.modes : []);
+    setCsEvolution(Array.isArray(cacheEntry.cs_evolution) ? cacheEntry.cs_evolution : []);
+    setLpEvolution(Array.isArray(cacheEntry.lp_evolution) ? cacheEntry.lp_evolution : []);
+    return true;
+  }
+
+  function resetLoadedMatchDetails() {
+    setMatchDetailsById({});
+    setDetailLoading(false);
+    setDetailError("");
+  }
+
+  async function loadMatchDetail(matchId, nextQueryParams = queryParams) {
+    if (!matchId || !nextQueryParams) {
+      return;
+    }
+
+    const cacheKey = buildMatchDetailCacheKey(nextQueryParams, matchId);
+    const cachedDetail = safeReadJson(cacheKey);
+
+    if (cachedDetail) {
+      setMatchDetailsById((current) => ({
+        ...current,
+        [matchId]: cachedDetail,
+      }));
+    } else if (matchDetailsById[matchId]) {
+      setDetailError("");
+      setDetailLoading(false);
+      return;
+    }
+
+    setDetailLoading(true);
+    setDetailError("");
+
+    try {
+      const matchDetail = await fetchFrontMatchDetail(matchId, nextQueryParams);
+      setMatchDetailsById((current) => ({
+        ...current,
+        [matchId]: matchDetail,
+      }));
+      safeWriteJson(cacheKey, matchDetail);
+    } catch (loadError) {
+      setDetailError(loadError.message || "Impossible de charger les details de cette partie.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   async function loadDashboard(nextPage = 1, nextMatchFilters = matchFilters, options = {}) {
     if (!queryParams) {
       setError("Renseigne un Riot ID ou un PUUID.");
@@ -216,12 +351,19 @@ export function App() {
       pushRecentRiotId(query.value);
     }
 
+    const useRemoteFilters = Boolean(options.remoteFilters);
+    const matchesCacheKey = buildMatchesCacheKey(queryParams, nextPage, nextMatchFilters, useRemoteFilters);
+    const dashboardCacheKey = buildDashboardCacheKey(queryParams);
+    const hasCachedMatches = applyCachedMatches(safeReadJson(matchesCacheKey));
+    const hasCachedDashboard = applyCachedDashboard(safeReadJson(dashboardCacheKey));
+
     setLoading(true);
     setError("");
-    setInfo("");
+    setInfo(hasCachedMatches || hasCachedDashboard ? "Affichage du cache local, mise a jour en cours..." : "");
+    resetLoadedMatchDetails();
 
     try {
-      const matchParams = options.remoteFilters ? buildMatchFilterParams(nextMatchFilters) : {};
+      const matchParams = useRemoteFilters ? buildMatchFilterParams(nextMatchFilters) : {};
       const [matchesResult, dashboardResult] = await Promise.allSettled([
         fetchFrontMatches({ ...queryParams, ...matchParams, page: nextPage }),
         fetchFrontDashboard(queryParams),
@@ -230,12 +372,12 @@ export function App() {
       if (matchesResult.status === "fulfilled") {
         const matchesResponse = matchesResult.value;
         const matchResults = matchesResponse.results || [];
-        const visibleMatches = options.remoteFilters ? matchResults : filterMatchesLocally(matchResults, nextMatchFilters);
+        const visibleMatches = useRemoteFilters ? matchResults : filterMatchesLocally(matchResults, nextMatchFilters);
 
-        if (!options.remoteFilters) {
+        if (!useRemoteFilters) {
           setPageMatches(matchResults);
         }
-        setRemoteFilteredMatches(Boolean(options.remoteFilters));
+        setRemoteFilteredMatches(useRemoteFilters);
         setMatches(visibleMatches);
         setMatchesPagination({
           next: matchesResponse.next,
@@ -244,10 +386,22 @@ export function App() {
           page: nextPage,
         });
         selectVisibleMatch(visibleMatches);
+        safeWriteJson(matchesCacheKey, {
+          matches: visibleMatches,
+          pageMatches: matchResults,
+          remoteFilteredMatches: useRemoteFilters,
+          pagination: {
+            next: matchesResponse.next,
+            previous: matchesResponse.previous,
+            count: matchesResponse.count || 0,
+            page: nextPage,
+          },
+        });
       } else {
         setMatches([]);
         setPageMatches([]);
         setMatchesPagination({ next: null, previous: null, count: 0, page: nextPage });
+        setSelectedMatchId(null);
       }
 
       if (dashboardResult.status === "fulfilled") {
@@ -257,6 +411,7 @@ export function App() {
         setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
         setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
         setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
+        safeWriteJson(dashboardCacheKey, dashboardResponse);
       } else {
         setGlobalStats(null);
         setChampionStats([]);
@@ -305,9 +460,13 @@ export function App() {
       pushRecentRiotId(query.value);
     }
 
+    const dashboardCacheKey = buildDashboardCacheKey(queryParams);
+    const matchesCacheKey = buildMatchesCacheKey(queryParams, 1, matchFilters, false);
+
     setLoading(true);
     setError("");
     setInfo("");
+    resetLoadedMatchDetails();
 
     try {
       if (query.mode === "riot_name") {
@@ -342,6 +501,18 @@ export function App() {
       setModeStats(Array.isArray(dashboardResponse.modes) ? dashboardResponse.modes : []);
       setCsEvolution(Array.isArray(dashboardResponse.cs_evolution) ? dashboardResponse.cs_evolution : []);
       setLpEvolution(Array.isArray(dashboardResponse.lp_evolution) ? dashboardResponse.lp_evolution : []);
+      safeWriteJson(matchesCacheKey, {
+        matches: visibleMatches,
+        pageMatches: matchResults,
+        remoteFilteredMatches: false,
+        pagination: {
+          next: matchesResponse.next,
+          previous: matchesResponse.previous,
+          count: matchesResponse.count || 0,
+          page: 1,
+        },
+      });
+      safeWriteJson(dashboardCacheKey, dashboardResponse);
       loadRecentRiotIds();
     } catch (refreshError) {
       setError(refreshError.message || "Impossible d'actualiser les données.");
@@ -350,7 +521,16 @@ export function App() {
     }
   }
 
-  const activeMatch = matches.find((match) => match.match_id === selectedMatchId) || matches[0] || null;
+  useEffect(() => {
+    if (!selectedMatchId || !queryParams) {
+      return;
+    }
+
+    loadMatchDetail(selectedMatchId, queryParams);
+  }, [selectedMatchId, queryParams]);
+
+  const activeMatchSummary = matches.find((match) => match.match_id === selectedMatchId) || matches[0] || null;
+  const activeMatch = (selectedMatchId && matchDetailsById[selectedMatchId]) || activeMatchSummary;
 
   return (
     <AppShell loading={loading} playerLabel={query.value}>
@@ -443,6 +623,9 @@ export function App() {
               pagination={matchesPagination}
               selectedMatchId={selectedMatchId}
               onSelectMatch={(match) => setSelectedMatchId(match.match_id)}
+              selectedMatchDetail={selectedMatchId ? matchDetailsById[selectedMatchId] || null : null}
+              detailLoading={detailLoading}
+              detailError={detailError}
               onPageChange={(page) => loadDashboard(page, matchFilters, { remoteFilters: remoteFilteredMatches })}
               loading={loading}
               filters={matchFilters}
