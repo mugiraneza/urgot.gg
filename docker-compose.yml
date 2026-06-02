@@ -1,9 +1,30 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: urgot-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-urgot}
+      POSTGRES_USER: ${POSTGRES_USER:-urgot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-urgot}
+    ports:
+      - "5431:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-urgot} -d ${POSTGRES_DB:-urgot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
   api:
     build:
       context: ./back
       dockerfile: Dockerfile
     container_name: urgot-api
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret-key-change-me}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
@@ -12,6 +33,13 @@ services:
       RIOT_IMPORT_WORKERS: ${RIOT_IMPORT_WORKERS:-5}
       API_GUNICORN_WORKERS: ${API_GUNICORN_WORKERS:-2}
       RIOT_IMPORT_CACHE_MAX_SIZE: ${RIOT_IMPORT_CACHE_MAX_SIZE:-1000}
+      POSTGRES_DB: ${POSTGRES_DB:-urgot}
+      POSTGRES_USER: ${POSTGRES_USER:-urgot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-urgot}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
+      SQLITE_IMPORT_PATH: ${SQLITE_IMPORT_PATH:-/app/import_db.sqlite3}
     volumes:
       - ./back:/app
     ports:
@@ -51,6 +79,13 @@ services:
       RIOT_KEY: ${RIOT_KEY:-}
       RIOT_IMPORT_WORKERS: ${RIOT_IMPORT_WORKERS:-5}
       RIOT_IMPORT_CACHE_MAX_SIZE: ${RIOT_IMPORT_CACHE_MAX_SIZE:-1000}
+      POSTGRES_DB: ${POSTGRES_DB:-urgot}
+      POSTGRES_USER: ${POSTGRES_USER:-urgot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-urgot}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
+      SQLITE_IMPORT_PATH: ${SQLITE_IMPORT_PATH:-/app/import_db.sqlite3}
     volumes:
       - ./back:/app
     mem_limit: ${IMPORT_WORKER_MEM_LIMIT:-512m}
@@ -73,3 +108,6 @@ services:
     restart: unless-stopped
     mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
     mem_reservation: ${FRONTEND_MEM_RESERVATION:-128m}
+
+volumes:
+  postgres_data:

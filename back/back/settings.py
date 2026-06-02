@@ -58,11 +58,48 @@ REST_FRAMEWORK = {
 }
 
 WSGI_APPLICATION = 'back.wsgi.application'
-DATABASES = {
-    'default': {
+
+
+def _resolve_sqlite_path(path_value, fallback):
+    if not path_value:
+        return fallback
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return BASE_DIR / path
+
+
+def _build_default_database():
+    postgres_host = os.environ.get("POSTGRES_HOST")
+    postgres_db = os.environ.get("POSTGRES_DB")
+    db_engine = os.environ.get("DB_ENGINE", "").strip().lower()
+
+    if db_engine == "postgres" or postgres_host or postgres_db:
+        return {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': postgres_db or 'urgot',
+            'USER': os.environ.get("POSTGRES_USER", "urgot"),
+            'PASSWORD': os.environ.get("POSTGRES_PASSWORD", "urgot"),
+            'HOST': postgres_host or 'postgres',
+            'PORT': int(os.environ.get("POSTGRES_PORT", "5432")),
+            'CONN_MAX_AGE': int(os.environ.get("POSTGRES_CONN_MAX_AGE", "60")),
+        }
+
+    return {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'import_db.sqlite3',
+        'NAME': _resolve_sqlite_path(os.environ.get("SQLITE_PATH"), BASE_DIR / 'import_db.sqlite3'),
     }
+
+
+DATABASES = {
+    'default': _build_default_database(),
+    'sqlite_import': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': _resolve_sqlite_path(
+            os.environ.get("SQLITE_IMPORT_PATH"),
+            BASE_DIR / 'import_db.sqlite3',
+        ),
+    },
 }
 AUTH_PASSWORD_VALIDATORS = [
     {

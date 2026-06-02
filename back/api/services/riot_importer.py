@@ -65,6 +65,9 @@ class BoundedCache:
             self._store.popitem(last=False)
         return value
 
+    def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
 
 RANK_CACHE = BoundedCache(IMPORT_CACHE_MAX_SIZE)
 SUMMONER_CACHE = BoundedCache(IMPORT_CACHE_MAX_SIZE)
@@ -232,14 +235,21 @@ def _get_ranked_queue_type_for_match(match: Match) -> Optional[str]:
     return MATCH_QUEUE_TO_RANK_QUEUE.get(match.queue_id)
 
 
-def get_rank_entries_for_puuid(puuid: str, platform_region: str) -> Dict[str, Dict]:
+def get_rank_entries_for_puuid(
+    puuid: str,
+    platform_region: str,
+    force_refresh: bool = False,
+) -> Dict[str, Dict]:
     if not _is_rank_lookup_puuid(puuid):
         return {}
 
     cache_key = f"{platform_region}:{puuid}"
-    cached_entries = RANK_CACHE.get(cache_key)
-    if cached_entries is not None:
-        return cached_entries
+    if force_refresh:
+        RANK_CACHE.delete(cache_key)
+    else:
+        cached_entries = RANK_CACHE.get(cache_key)
+        if cached_entries is not None:
+            return cached_entries
 
     try:
         entries = _get_json(
@@ -269,8 +279,13 @@ def get_rank_entry_for_puuid(
     puuid: str,
     platform_region: str,
     preferred_queue_type: Optional[str] = None,
+    force_refresh: bool = False,
 ) -> Dict:
-    entries_by_queue = get_rank_entries_for_puuid(puuid, platform_region)
+    entries_by_queue = get_rank_entries_for_puuid(
+        puuid,
+        platform_region,
+        force_refresh=force_refresh,
+    )
     if not entries_by_queue:
         return {}
 
@@ -338,9 +353,18 @@ def build_profile_icon_url(profile_icon_id: Optional[int], allow_network: bool =
     return f"{DATA_DRAGON_BASE_URL}/cdn/{version}/img/profileicon/{profile_icon_id}.png"
 
 
-def store_rank_snapshot(match_id: str, puuid: str, riot_name: str) -> None:
+def store_rank_snapshot(
+    match_id: str,
+    puuid: str,
+    riot_name: str,
+    force_refresh: bool = False,
+) -> None:
     platform_region = get_platform_region(match_id)
-    rank_entries = get_rank_entries_for_puuid(puuid, platform_region)
+    rank_entries = get_rank_entries_for_puuid(
+        puuid,
+        platform_region,
+        force_refresh=force_refresh,
+    )
     if not rank_entries:
         return
 
@@ -776,5 +800,5 @@ def run_match_import(riot_id: str, region: str):
     if snapshot_match_id:
         # Riot ne fournit pas le LP gagne/perdu dans les donnees de match.
         # On capture l'etat classe courant et on l'associe au match le plus recent connu.
-        store_rank_snapshot(snapshot_match_id, puuid, riot_id)
+        store_rank_snapshot(snapshot_match_id, puuid, riot_id, force_refresh=True)
     print(f"[✅][{_current_log_timestamp()}]..... Import terminé.")

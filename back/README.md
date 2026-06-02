@@ -23,6 +23,10 @@ Variables minimales :
 - `DJANGO_DEBUG`
 - `DJANGO_ALLOWED_HOSTS`
 - `RIOT_KEY`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `POSTGRES_HOST`
 
 Exemple de fichier `.env` :
 
@@ -31,6 +35,13 @@ DJANGO_SECRET_KEY=change-me
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,api
 RIOT_KEY=RGAPI-xxxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx
+POSTGRES_DB=urgot
+POSTGRES_USER=urgot
+POSTGRES_PASSWORD=urgot
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_CONN_MAX_AGE=60
+SQLITE_IMPORT_PATH=/app/import_db.sqlite3
 ```
 
 ## Lancement local
@@ -75,3 +86,25 @@ python manage.py poll_tracked_imports --interval-minutes 30
 ```
 
 En Docker, ce role est porte par le service `import-worker`.
+
+## Reprise de donnees SQLite vers PostgreSQL
+
+Une commande Django permet de reprendre les donnees applicatives depuis l'ancien fichier SQLite vers PostgreSQL :
+
+```powershell
+python manage.py import_sqlite_data --source sqlite_import --target default
+```
+
+Avec un chemin SQLite explicite :
+
+```powershell
+python manage.py import_sqlite_data --sqlite-path C:\git\urgot.gg\back\import_db.sqlite3
+```
+
+Si la base cible est neuve et que tu veux la vider avant reprise :
+
+```powershell
+python manage.py import_sqlite_data --flush-target
+```
+
+Par defaut, la commande reprend l'application `api` uniquement.

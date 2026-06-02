@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnapshot, Team, TrackedSummoner
 from .services.riot_importer import (
     BoundedCache,
+    RANK_CACHE,
     _get_json,
     find_accounts_by_riot_id,
     get_account_by_riot_id,
@@ -1005,6 +1006,49 @@ class RiotImporterAdvancedFieldsTests(TestCase):
         self.assertEqual(snapshots["RANKED_FLEX_SR"].tier, "EMERALD")
         self.assertEqual(snapshots["RANKED_FLEX_SR"].rank_division, "II")
         self.assertEqual(snapshots["RANKED_FLEX_SR"].league_points, 61)
+
+    @patch("api.services.riot_importer._get_json")
+    def test_store_rank_snapshot_force_refreshes_stale_rank_cache(self, mock_get_json):
+        cache_key = "euw1:player-1-player-1-player-1"
+        RANK_CACHE.set(
+            cache_key,
+            {
+                "RANKED_SOLO_5x5": {
+                    "queueType": "RANKED_SOLO_5x5",
+                    "tier": "GOLD",
+                    "rank": "II",
+                    "leaguePoints": 47,
+                    "wins": 10,
+                    "losses": 8,
+                }
+            },
+        )
+        mock_get_json.return_value = [
+            {
+                "queueType": "RANKED_SOLO_5x5",
+                "tier": "PLATINUM",
+                "rank": "IV",
+                "leaguePoints": 23,
+                "wins": 40,
+                "losses": 35,
+            }
+        ]
+
+        store_rank_snapshot(
+            self.match.match_id,
+            "player-1-player-1-player-1",
+            "player#euw",
+            force_refresh=True,
+        )
+
+        snapshot = RankSnapshot.objects.get(
+            match=self.match,
+            puuid="player-1-player-1-player-1",
+            queue_type="RANKED_SOLO_5x5",
+        )
+        self.assertEqual(snapshot.tier, "PLATINUM")
+        self.assertEqual(snapshot.rank_division, "IV")
+        self.assertEqual(snapshot.league_points, 23)
 
 
 class DetailedMatchStatsRankTests(TestCase):
