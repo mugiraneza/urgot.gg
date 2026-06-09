@@ -19,6 +19,7 @@ urlpatterns = [
     path('import/import-champs-items/', views.TriggerChampionItemImportViewSet.as_view(), name='import-champs-items'),  # note le `/` à la fin
     path('import/import-matches/', views.TriggerMatchImportViewSet.as_view(), name='import-matches'),  # note le `/` à la fin
     path('import/repair-stored-imports/', views.RepairStoredImportsView.as_view(), name='repair-stored-imports'),
+    path('import/repair-ranked-values/', views.RepairRankedValuesView.as_view(), name='repair-ranked-values'),
     path('import/count-matches/', views.MatchcountViewSet.as_view(), name='count-matches'),  # idem ici
     path('import/import-status/', views.ImportStatusView.as_view(), name='import-status'),  # idem ici
     path('stats/poste-last-60-day/', views.PositionStatsView.as_view(), name='poste-last-60-day'), 

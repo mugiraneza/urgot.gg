@@ -379,6 +379,162 @@ def _build_player_rank_overview(request, filters, latest_ranked_participant):
     }
 
 
+def _get_latest_ranked_participant(filters):
+    participants = list(
+        Participant.objects.filter(**filters)
+        .select_related("match")
+        .only(
+            "puuid",
+            "riot_name",
+            "rank_queue",
+            "rank_tier",
+            "rank_division",
+            "rank_lp",
+            "match__queue_id",
+            "match__game_creation",
+        )
+        .order_by("match__game_creation")
+    )
+    if not participants:
+        return None
+
+    return next(
+        (participant for participant in reversed(participants) if participant.rank_tier),
+        None,
+    )
+
+
+def _get_latest_resolved_rank(filters, latest_ranked_participant=None):
+    latest_ranked_participant = latest_ranked_participant or _get_latest_ranked_participant(filters)
+    if not latest_ranked_participant:
+        return None
+
+    latest_snapshots_by_puuid = _get_latest_rank_snapshots_by_puuid({latest_ranked_participant.puuid})
+    return _resolve_rank_for_match(latest_ranked_participant, latest_snapshots_by_puuid)
+
+
+def _get_rank_repair_target_snapshot(participant, latest_snapshots_by_puuid=None):
+    expected_queue_type = RANK_QUEUE_BY_MATCH_QUEUE.get(participant.match.queue_id)
+    if not expected_queue_type:
+        return None, "unsupported_queue"
+
+    match_snapshot = (
+        RankSnapshot.objects.filter(
+            match=participant.match,
+            puuid=participant.puuid,
+            queue_type=expected_queue_type,
+        )
+        .order_by("-captured_at")
+        .first()
+    )
+    if match_snapshot:
+        return match_snapshot, None
+
+    snapshots_by_queue = (latest_snapshots_by_puuid or {}).get(participant.puuid, {})
+    latest_snapshot = snapshots_by_queue.get(expected_queue_type)
+    if latest_snapshot:
+        return latest_snapshot, None
+
+    return None, "missing_snapshot"
+
+
+def _repair_ranked_values(match_id=None, puuid=None, riot_name=None):
+    participants = Participant.objects.select_related("match").all()
+
+    if match_id:
+        participants = participants.filter(match_id=match_id)
+    elif puuid:
+        participants = participants.filter(puuid=puuid)
+    elif riot_name:
+        resolved_puuid = _resolve_puuid_from_riot_name(riot_name)
+        if resolved_puuid:
+            participants = participants.filter(puuid=resolved_puuid)
+        else:
+            participants = participants.filter(riot_name__iexact=riot_name)
+    else:
+        raise ValueError("Veuillez fournir 'match_id', 'puuid' ou 'riot_name'.")
+
+    participants = list(participants.order_by("match__game_creation", "participant_id"))
+    if not participants:
+        return {
+            "checked": 0,
+            "updated": 0,
+            "skipped": 0,
+            "details": [],
+        }
+
+    latest_snapshots_by_puuid = _get_latest_rank_snapshots_by_puuid({participant.puuid for participant in participants})
+    summary = {
+        "checked": 0,
+        "updated": 0,
+        "skipped": 0,
+        "details": [],
+    }
+
+    for participant in participants:
+        summary["checked"] += 1
+        snapshot, skip_reason = _get_rank_repair_target_snapshot(participant, latest_snapshots_by_puuid)
+        if not snapshot:
+            summary["skipped"] += 1
+            summary["details"].append(
+                {
+                    "match_id": participant.match_id,
+                    "participant_id": participant.participant_id,
+                    "puuid": participant.puuid,
+                    "status": "skipped",
+                    "reason": skip_reason,
+                }
+            )
+            continue
+
+        updates = {
+            "rank_queue": snapshot.queue_type,
+            "rank_tier": snapshot.tier,
+            "rank_division": snapshot.rank_division,
+            "rank_lp": snapshot.league_points,
+        }
+        changed_fields = [
+            field_name
+            for field_name, expected_value in updates.items()
+            if getattr(participant, field_name) != expected_value
+        ]
+
+        if not changed_fields:
+            summary["details"].append(
+                {
+                    "match_id": participant.match_id,
+                    "participant_id": participant.participant_id,
+                    "puuid": participant.puuid,
+                    "status": "ok",
+                    "rank_queue": participant.rank_queue,
+                    "rank_tier": participant.rank_tier,
+                    "rank_division": participant.rank_division,
+                    "rank_lp": participant.rank_lp,
+                }
+            )
+            continue
+
+        for field_name, value in updates.items():
+            setattr(participant, field_name, value)
+        participant.save(update_fields=changed_fields)
+        summary["updated"] += 1
+        summary["details"].append(
+            {
+                "match_id": participant.match_id,
+                "participant_id": participant.participant_id,
+                "puuid": participant.puuid,
+                "status": "updated",
+                "updated_fields": changed_fields,
+                "rank_queue": participant.rank_queue,
+                "rank_tier": participant.rank_tier,
+                "rank_division": participant.rank_division,
+                "rank_lp": participant.rank_lp,
+            }
+        )
+
+    return summary
+
+
 def _serialize_participant_details(request, participant, latest_snapshots_by_puuid=None):
     resolved_rank = _resolve_rank_for_match(participant, latest_snapshots_by_puuid)
     return {
@@ -690,10 +846,8 @@ def _build_global_overview(request, filters):
 
     total_games = len(participants)
     total_wins = sum(1 for participant in participants if participant.win)
-    latest_ranked_participant = next(
-        (participant for participant in reversed(participants) if participant.rank_tier),
-        None,
-    )
+    latest_ranked_participant = next((participant for participant in reversed(participants) if participant.rank_tier), None)
+    latest_resolved_rank = _get_latest_resolved_rank(filters, latest_ranked_participant)
     latest_participant = participants[-1]
     player_rank_overview = _build_player_rank_overview(request, filters, latest_ranked_participant)
     first_match = datetime.utcfromtimestamp(participants[0].match.game_creation // 1000)
@@ -745,8 +899,8 @@ def _build_global_overview(request, filters):
     return {
         "games_analyzed": total_games,
         "winrate": round((total_wins / total_games) * 100, 1) if total_games else 0,
-        "player_elo": _format_rank_label(latest_ranked_participant) if latest_ranked_participant else None,
-        "player_elo_icon_url": _build_asset_url(request, "elo", _build_rank_icon_name(latest_ranked_participant.rank_tier)) if latest_ranked_participant else None,
+        "player_elo": latest_resolved_rank["rank_label"] if latest_resolved_rank else None,
+        "player_elo_icon_url": _build_asset_url(request, "elo", _build_rank_icon_name(latest_resolved_rank["rank_tier"])) if latest_resolved_rank else None,
         "player_profile_icon_url": _build_player_profile_icon_url(latest_participant),
         "player_ranks": player_rank_overview,
         "oldest_match": first_match.strftime("%a, %d %b %Y %H:%M:%S GMT"),
@@ -872,11 +1026,9 @@ def _build_lp_evolution(filters):
     if not ranked_snapshots:
         return []
 
-    queue_types = {snapshot.queue_type for snapshot in ranked_snapshots}
-    if "RANKED_SOLO_5x5" in queue_types:
-        selected_queue_type = "RANKED_SOLO_5x5"
-    elif "RANKED_FLEX_SR" in queue_types:
-        selected_queue_type = "RANKED_FLEX_SR"
+    latest_resolved_rank = _get_latest_resolved_rank(filters)
+    if latest_resolved_rank and latest_resolved_rank["rank_queue"]:
+        selected_queue_type = latest_resolved_rank["rank_queue"]
     else:
         selected_queue_type = ranked_snapshots[-1].queue_type
 
@@ -1171,6 +1323,49 @@ class RepairStoredImportsView(views.APIView):
             match_id = request.data.get("match_id")
             result = repair_incomplete_match_imports(match_id=match_id)
             return Response(result, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RepairRankedValuesView(views.APIView):
+    """
+    Corrige les valeurs de rang stockees sur Participant a partir des snapshots existants.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Corrige rank_queue/rank_tier/rank_division/rank_lp depuis RankSnapshot pour un match ou un joueur.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "match_id": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Optionnel: corriger un match precis.",
+                ),
+                "puuid": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Optionnel: corriger tous les matchs de ce joueur.",
+                ),
+                "riot_name": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Optionnel: corriger tous les matchs de ce joueur via son Riot ID.",
+                ),
+            },
+        ),
+        responses={
+            200: openapi.Response(description="Correction terminee."),
+            400: openapi.Response(description="Parametres invalides."),
+            500: openapi.Response(description="Erreur serveur."),
+        }
+    )
+    def post(self, request, **kwargs):
+        try:
+            match_id = request.data.get("match_id")
+            puuid = request.data.get("puuid")
+            riot_name = request.data.get("riot_name")
+            result = _repair_ranked_values(match_id=match_id, puuid=puuid, riot_name=riot_name)
+            return Response(result, status=200)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

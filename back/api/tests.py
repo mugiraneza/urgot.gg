@@ -542,7 +542,7 @@ class FrontApiViewTests(TestCase):
         self.assertEqual(ranks["flex"]["label"], "PLATINUM IV - 23 LP")
         self.assertEqual(ranks["flex"]["tier"], "PLATINUM")
 
-    def test_front_dashboard_lp_evolution_uses_rank_score_and_prefers_solo_queue(self):
+    def test_front_dashboard_lp_evolution_uses_rank_score_for_latest_ranked_queue(self):
         later_match = Match.objects.create(
             match_id="EUW1_5",
             game_creation=self.match.game_creation + 1000,
@@ -581,13 +581,61 @@ class FrontApiViewTests(TestCase):
             rank_division="II",
             league_points=80,
         )
+        participant = Participant.objects.get(match=later_match, puuid="player-1")
+        participant.rank_queue = "RANKED_FLEX_SR"
+        participant.rank_tier = "SILVER"
+        participant.rank_division = "II"
+        participant.rank_lp = 80
+        participant.save(update_fields=["rank_queue", "rank_tier", "rank_division", "rank_lp"])
 
         response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
 
         self.assertEqual(response.status_code, 200)
         evolution = response.json()["lp_evolution"]
-        self.assertEqual([entry["queue_type"] for entry in evolution], ["RANKED_SOLO_5x5", "RANKED_SOLO_5x5"])
-        self.assertEqual([entry["elo_score"] for entry in evolution], [1590, 1610])
+        self.assertEqual([entry["queue_type"] for entry in evolution], ["RANKED_FLEX_SR"])
+        self.assertEqual([entry["elo_score"] for entry in evolution], [1280])
+
+    def test_front_dashboard_player_elo_uses_latest_ranked_queue_snapshot(self):
+        flex_match = Match.objects.create(
+            match_id="EUW1_6",
+            game_creation=self.match.game_creation + 2000,
+            game_end_ts=self.match.game_end_ts + 2000,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=440,
+        )
+        Participant.objects.create(
+            match=flex_match,
+            participant_id=1,
+            **participant_defaults(
+                puuid="player-1",
+                riot_name="player#euw",
+                team_id=100,
+                rank_queue="RANKED_SOLO_5x5",
+                rank_tier="GOLD",
+                rank_division="II",
+                rank_lp=47,
+            ),
+        )
+        RankSnapshot.objects.create(
+            match=flex_match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_FLEX_SR",
+            tier="PLATINUM",
+            rank_division="IV",
+            league_points=23,
+        )
+
+        response = self.client.get(reverse("front-dashboard"), {"riot_name": "player#euw"})
+
+        self.assertEqual(response.status_code, 200)
+        overview = response.json()["overview"]
+        self.assertEqual(overview["player_elo"], "PLATINUM IV - 23 LP")
+        self.assertEqual(overview["player_ranks"]["flex"]["label"], "PLATINUM IV - 23 LP")
 
     @patch("api.views.build_profile_icon_url", return_value="https://ddragon.leagueoflegends.com/cdn/15.1.1/img/profileicon/1234.png")
     @patch("api.views.get_summoner_profile_by_puuid", return_value={"profileIconId": 1234})
@@ -1267,3 +1315,53 @@ class RepairStoredImportsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["repaired"], 1)
         repair_mock.assert_called_once_with(match_id=self.match.match_id)
+
+    def test_repair_ranked_values_endpoint_updates_participant_rank_from_snapshot(self):
+        participant = Participant.objects.create(
+            match=self.match,
+            participant_id=1,
+            **participant_defaults(
+                puuid="player-1",
+                riot_name="player#euw",
+                team_id=100,
+                champion=self.champion,
+                rank_queue="RANKED_SOLO_5x5",
+                rank_tier="GOLD",
+                rank_division="II",
+                rank_lp=47,
+            ),
+        )
+        self.match.queue_id = 440
+        self.match.save(update_fields=["queue_id"])
+        RankSnapshot.objects.create(
+            match=self.match,
+            puuid="player-1",
+            riot_name="player#euw",
+            queue_type="RANKED_FLEX_SR",
+            tier="PLATINUM",
+            rank_division="IV",
+            league_points=23,
+        )
+
+        response = self.client.post(
+            reverse("repair-ranked-values"),
+            {"match_id": self.match.match_id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 1)
+        participant.refresh_from_db()
+        self.assertEqual(participant.rank_queue, "RANKED_FLEX_SR")
+        self.assertEqual(participant.rank_tier, "PLATINUM")
+        self.assertEqual(participant.rank_division, "IV")
+        self.assertEqual(participant.rank_lp, 23)
+
+    def test_repair_ranked_values_endpoint_requires_target(self):
+        response = self.client.post(
+            reverse("repair-ranked-values"),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
