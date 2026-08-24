@@ -1,11 +1,13 @@
 import os
 import time
 import requests
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
 from datetime import datetime
@@ -221,6 +223,29 @@ def get_timeline(mid: str, region: str) -> Dict:
 
 def fetch_match_bundle(mid: str, region: str) -> Tuple[str, Dict, Dict]:
     return mid, get_match(mid, region), get_timeline(mid, region)
+
+
+def _advisory_lock_key(value: str) -> int:
+    """Return a stable signed bigint suitable for a PostgreSQL advisory lock."""
+    digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)
+
+
+@contextmanager
+def _match_import_lock(mid: str):
+    """Serialize imports of one match across API and background processes."""
+    if connection.vendor != "postgresql":
+        yield
+        return
+
+    lock_key = _advisory_lock_key(f"riot-match:{mid}")
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_lock(%s)", [lock_key])
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_unlock(%s)", [lock_key])
 
 
 def get_platform_region(match_id: str) -> str:
@@ -627,6 +652,26 @@ def insert_deaths(mid: str, timeline: Dict):
                 )
 
 
+def _import_match_bundle_if_missing(mid: str, match_data: Dict, timeline: Dict) -> bool:
+    """Import a complete match once, even when multiple processes discovered it."""
+    with _match_import_lock(mid):
+        # Another process may have imported the match after this process built its
+        # `to_do` list. Rechecking while holding the database lock prevents all
+        # related get_or_create calls from racing and polluting PostgreSQL logs.
+        if Match.objects.filter(pk=mid).exists():
+            return False
+
+        # Keep the existence check meaningful after a failed import: either all
+        # related rows are committed, or the Match row is rolled back too.
+        with transaction.atomic():
+            insert_match(match_data["info"], mid, match_data)
+            insert_teams(mid, match_data["info"]["teams"])
+            insert_participants(mid, match_data["info"]["participants"])
+            insert_deaths(mid, timeline)
+            insert_skill_orders(mid, timeline)
+        return True
+
+
 def _expected_import_counts(stored_match: Dict[str, Any]) -> Dict[str, int]:
     info = stored_match.get("info") or {}
     teams = info.get("teams") or []
@@ -770,14 +815,9 @@ def run_match_import(riot_id: str, region: str):
     if IMPORT_WORKERS <= 1:
         for i, mid in enumerate(to_do, 1):
             print(f"[{i}/{len(to_do)}] Import {mid}")
-            match_data = get_match(mid, region)
-            insert_match(match_data["info"], mid, match_data)
-            insert_teams(mid, match_data["info"]["teams"])
-            insert_participants(mid, match_data["info"]["participants"])
-
-            timeline = get_timeline(mid, region)
-            insert_deaths(mid, timeline)
-            insert_skill_orders(mid, timeline)
+            _, match_data, timeline = fetch_match_bundle(mid, region)
+            if not _import_match_bundle_if_missing(mid, match_data, timeline):
+                print(f"[i] {mid} déjà importé par un autre processus")
             time.sleep(DELAY_SEC)
     else:
         print(f"[i] Telechargement parallele active: {IMPORT_WORKERS} workers")
@@ -789,11 +829,8 @@ def run_match_import(riot_id: str, region: str):
             for i, future in enumerate(as_completed(future_map), 1):
                 mid, match_data, timeline = future.result()
                 print(f"[{i}/{len(to_do)}] Import {mid}")
-                insert_match(match_data["info"], mid, match_data)
-                insert_teams(mid, match_data["info"]["teams"])
-                insert_participants(mid, match_data["info"]["participants"])
-                insert_deaths(mid, timeline)
-                insert_skill_orders(mid, timeline)
+                if not _import_match_bundle_if_missing(mid, match_data, timeline):
+                    print(f"[i] {mid} déjà importé par un autre processus")
 
 
     snapshot_match_id = to_do[0] if to_do else (all_ids[0] if all_ids else None)

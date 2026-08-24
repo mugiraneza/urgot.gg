@@ -12,6 +12,7 @@ from .models import Ban, Champion, Item, Match, Objective, Participant, RankSnap
 from .services.riot_importer import (
     BoundedCache,
     RANK_CACHE,
+    _import_match_bundle_if_missing,
     _get_json,
     find_accounts_by_riot_id,
     get_account_by_riot_id,
@@ -1097,6 +1098,43 @@ class RiotImporterAdvancedFieldsTests(TestCase):
         self.assertEqual(snapshot.tier, "PLATINUM")
         self.assertEqual(snapshot.rank_division, "IV")
         self.assertEqual(snapshot.league_points, 23)
+
+
+class ConcurrentMatchImportTests(TestCase):
+    def setUp(self):
+        self.match = Match.objects.create(
+            match_id="EUW1_concurrent",
+            game_creation=1,
+            game_end_ts=2,
+            game_duration=1800,
+            game_mode="CLASSIC",
+            game_type="MATCHED_GAME",
+            game_version="1.0",
+            map_id=11,
+            queue_id=420,
+        )
+
+    @patch("api.services.riot_importer.insert_skill_orders")
+    @patch("api.services.riot_importer.insert_deaths")
+    @patch("api.services.riot_importer.insert_participants")
+    @patch("api.services.riot_importer.insert_teams")
+    @patch("api.services.riot_importer.insert_match")
+    def test_match_bundle_is_skipped_when_another_process_imported_it(
+        self,
+        insert_match_mock,
+        insert_teams_mock,
+        insert_participants_mock,
+        insert_deaths_mock,
+        insert_skill_orders_mock,
+    ):
+        imported = _import_match_bundle_if_missing(self.match.match_id, {}, {})
+
+        self.assertFalse(imported)
+        insert_match_mock.assert_not_called()
+        insert_teams_mock.assert_not_called()
+        insert_participants_mock.assert_not_called()
+        insert_deaths_mock.assert_not_called()
+        insert_skill_orders_mock.assert_not_called()
 
 
 class DetailedMatchStatsRankTests(TestCase):
