@@ -1,4 +1,6 @@
 import os
+import sys
+import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -28,6 +30,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Compresse les reponses JSON (le dashboard passe d'environ 200 Ko a quelques dizaines).
+    'django.middleware.gzip.GZipMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -58,6 +62,20 @@ REST_FRAMEWORK = {
 }
 
 WSGI_APPLICATION = 'back.wsgi.application'
+
+# Cache partage entre les workers gunicorn (LocMem etait propre a chaque processus,
+# ce qui rendait le cache des dashboards et des Riot ID recents incoherent).
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+        'LOCATION': os.environ.get("DJANGO_CACHE_DIR", str(Path(tempfile.gettempdir()) / "urgot-cache")),
+        'TIMEOUT': 60 * 30,
+        'OPTIONS': {'MAX_ENTRIES': 2000},
+    }
+}
+if "test" in sys.argv:
+    # Les tests ne doivent pas lire ni polluer le cache de l'API qui tourne.
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
 
 def _resolve_sqlite_path(path_value, fallback):

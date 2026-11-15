@@ -133,6 +133,10 @@ const rankedLinePlugin = {
 
 Chart.register(rankedLinePlugin);
 
+Chart.defaults.color = "#8b8f98";
+Chart.defaults.borderColor = "rgba(255, 255, 255, 0.06)";
+Chart.defaults.font.family = '"Plus Jakarta Sans", "Segoe UI", sans-serif';
+
 export function ChartCard({ title, subtitle, type, data, variant }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);

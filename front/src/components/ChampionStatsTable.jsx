@@ -15,7 +15,7 @@ export function ChampionStatsTable({ rows }) {
             <div className="champion-meta">
               <div className="champion-meta-title">
                 {row.champion_image_url ? (
-                  <img className="champion-icon" src={row.champion_image_url} alt={row.champion} />
+                  <img loading="lazy" decoding="async" className="champion-icon" src={row.champion_image_url} alt={row.champion} />
                 ) : null}
                 <strong>{row.champion}</strong>
               </div>
