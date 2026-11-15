@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 from django.db import connection, transaction
 from django.utils import timezone
+from api.services.riot_mapping import match_raw_fields, participant_raw_fields, team_raw_fields
 from api.models import Match, Participant, Team, Ban, Objective, Death, Item, Champion, RankSnapshot
 from datetime import datetime
 
@@ -478,13 +479,11 @@ def _participant_defaults(p: Dict, rank_entry: Dict) -> Dict:
         "turrets_lost": p.get("turretsLost"),
         "objectives_stolen": p.get("objectivesStolen"),
         "objectives_stolen_assists": p.get("objectivesStolenAssists"),
-        "solo_kills": p.get("soloKills"),
         "vision_score": p["visionScore"],
         "wards_placed": p["wardsPlaced"],
         "detector_wards_placed": p.get("detectorWardsPlaced"),
         "vision_wards_bought_in_game": p.get("visionWardsBoughtInGame"),
         "wards_killed": p.get("wardsKilled"),
-        "stealth_wards_placed": p.get("stealthWardsPlaced"),
         "vision_score_advantage_lane_opponent": challenges.get("visionScoreAdvantageLaneOpponent"),
         "total_minions_killed": p["totalMinionsKilled"],
         "neutral_minions_killed": p["neutralMinionsKilled"],
@@ -526,6 +525,9 @@ def _participant_defaults(p: Dict, rank_entry: Dict) -> Dict:
         "rank_lp": rank_entry.get("leaguePoints"),
     }
     defaults.update(_extract_perk_data(p))
+    # Tous les autres champs du JSON Riot (dont solo_kills / stealth_wards_placed,
+    # qui sont dans `challenges` et etaient jusqu'ici toujours vides).
+    defaults.update(participant_raw_fields(p))
     return defaults
 
 def insert_match(info: Dict, mid: str, obj:Dict):
@@ -542,6 +544,7 @@ def insert_match(info: Dict, mid: str, obj:Dict):
             "queue_id": info["queueId"],
             "tournament_code": info.get("tournamentCode"),
             "objet_complet":obj,
+            **match_raw_fields(obj),
         },
     )
 
@@ -560,6 +563,7 @@ def upsert_match(info: Dict, mid: str, obj: Dict):
             "queue_id": info["queueId"],
             "tournament_code": info.get("tournamentCode"),
             "objet_complet": obj,
+            **match_raw_fields(obj),
         },
     )
 
@@ -578,6 +582,7 @@ def insert_teams(mid: str, teams: List[Dict]):
                 "dragon_kills": obj["dragon"]["kills"],
                 "tower_first": obj["tower"]["first"],
                 "tower_kills": obj["tower"]["kills"],
+                **team_raw_fields(t),
             },
         )
         for b in t["bans"]:

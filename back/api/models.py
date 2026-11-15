@@ -20,6 +20,15 @@ class Match(models.Model):
     queue_id = models.IntegerField()
     tournament_code = models.CharField(max_length=100, blank=True, null=True)
     objet_complet = models.JSONField(null=True,blank=True)
+    # Champs repris de objet_complet (null = match pas encore repris)
+    game_id = models.BigIntegerField(null=True, blank=True)
+    game_name = models.CharField(max_length=100, blank=True, null=True)
+    game_start_ts = models.BigIntegerField(null=True, blank=True)
+    platform_id = models.CharField(max_length=10, blank=True, null=True)
+    end_of_game_result = models.CharField(max_length=50, blank=True, null=True)
+    game_mode_mutators = models.JSONField(null=True, blank=True)
+    data_version = models.CharField(max_length=10, blank=True, null=True)
+
     def save(self, *args, **kwargs):
         if self.match_id:
             self.game_region = self.match_id.split('_', 1)[0]
@@ -117,6 +126,94 @@ class Participant(models.Model):
     rank_division = models.CharField(max_length=10, blank=True, default="")
     rank_lp = models.IntegerField(null=True, blank=True)
 
+    # ---- Champs repris de objet_complet (voir api/services/riot_mapping.py) ----
+    # identite
+    riot_id_game_name = models.CharField(max_length=100, blank=True, null=True)
+    riot_id_tagline = models.CharField(max_length=20, blank=True, null=True)
+    summoner_id = models.CharField(max_length=80, blank=True, null=True)
+    summoner_name = models.CharField(max_length=100, blank=True, null=True)
+    summoner_level = models.IntegerField(null=True, blank=True)
+    profile_icon = models.IntegerField(null=True, blank=True)
+    position_assigned_by_matchmaking = models.CharField(max_length=20, blank=True, null=True)
+    selected_role_preferences = models.CharField(max_length=100, blank=True, null=True)
+    # combat
+    double_kills = models.IntegerField(null=True, blank=True)
+    triple_kills = models.IntegerField(null=True, blank=True)
+    unreal_kills = models.IntegerField(null=True, blank=True)
+    largest_critical_strike = models.IntegerField(null=True, blank=True)
+    bounty_level = models.IntegerField(null=True, blank=True)
+    first_blood_assist = models.BooleanField(null=True, blank=True)
+    first_tower_assist = models.BooleanField(null=True, blank=True)
+    total_time_spent_dead = models.IntegerField(null=True, blank=True)
+    total_units_healed = models.IntegerField(null=True, blank=True)
+    # degats detailles
+    total_damage_dealt = models.IntegerField(null=True, blank=True)
+    physical_damage_dealt = models.IntegerField(null=True, blank=True)
+    physical_damage_dealt_to_champions = models.IntegerField(null=True, blank=True)
+    physical_damage_taken = models.IntegerField(null=True, blank=True)
+    magic_damage_dealt = models.IntegerField(null=True, blank=True)
+    magic_damage_dealt_to_champions = models.IntegerField(null=True, blank=True)
+    magic_damage_taken = models.IntegerField(null=True, blank=True)
+    true_damage_dealt = models.IntegerField(null=True, blank=True)
+    true_damage_dealt_to_champions = models.IntegerField(null=True, blank=True)
+    true_damage_taken = models.IntegerField(null=True, blank=True)
+    damage_dealt_to_buildings = models.IntegerField(null=True, blank=True)
+    damage_dealt_to_epic_monsters = models.IntegerField(null=True, blank=True)
+    # objectifs / structures
+    baron_kills = models.IntegerField(null=True, blank=True)
+    dragon_kills = models.IntegerField(null=True, blank=True)
+    turret_takedowns = models.IntegerField(null=True, blank=True)
+    inhibitors_lost = models.IntegerField(null=True, blank=True)
+    nexus_kills = models.IntegerField(null=True, blank=True)
+    nexus_lost = models.IntegerField(null=True, blank=True)
+    nexus_takedowns = models.IntegerField(null=True, blank=True)
+    # farm / vision / objets
+    total_ally_jungle_minions_killed = models.IntegerField(null=True, blank=True)
+    total_enemy_jungle_minions_killed = models.IntegerField(null=True, blank=True)
+    sight_wards_bought_in_game = models.IntegerField(null=True, blank=True)
+    items_purchased = models.IntegerField(null=True, blank=True)
+    consumables_purchased = models.IntegerField(null=True, blank=True)
+    role_bound_item = models.IntegerField(null=True, blank=True)
+    # sorts
+    spell1_casts = models.IntegerField(null=True, blank=True)
+    spell2_casts = models.IntegerField(null=True, blank=True)
+    spell3_casts = models.IntegerField(null=True, blank=True)
+    spell4_casts = models.IntegerField(null=True, blank=True)
+    summoner1_casts = models.IntegerField(null=True, blank=True)
+    summoner2_casts = models.IntegerField(null=True, blank=True)
+    # modes Arena / Swarm
+    placement = models.IntegerField(null=True, blank=True)
+    subteam_placement = models.IntegerField(null=True, blank=True)
+    player_subteam_id = models.IntegerField(null=True, blank=True)
+    player_augments = models.JSONField(null=True, blank=True)
+    # fin de partie / comportement
+    eligible_for_progression = models.BooleanField(null=True, blank=True)
+    game_ended_in_ignb_surrender = models.BooleanField(null=True, blank=True)
+    team_ignb_surrendered = models.BooleanField(null=True, blank=True)
+    caused_game_end_from_ignb_surrender = models.BooleanField(null=True, blank=True)
+    was_afk = models.BooleanField(null=True, blank=True)
+    was_premade_with_ignb_game_end_causer = models.BooleanField(null=True, blank=True)
+    was_premade_with_severe_transgressor = models.BooleanField(null=True, blank=True)
+    was_severe_transgressor = models.BooleanField(null=True, blank=True)
+    # valeurs de `challenges` promues en colonnes
+    kill_participation = models.FloatField(null=True, blank=True)
+    team_damage_percentage = models.FloatField(null=True, blank=True)
+    damage_taken_on_team_percentage = models.FloatField(null=True, blank=True)
+    vision_score_per_minute = models.FloatField(null=True, blank=True)
+    effective_heal_and_shielding = models.FloatField(null=True, blank=True)
+    max_cs_advantage_on_lane_opponent = models.FloatField(null=True, blank=True)
+    control_wards_placed = models.IntegerField(null=True, blank=True)
+    turret_plates_taken = models.IntegerField(null=True, blank=True)
+    skillshots_hit = models.IntegerField(null=True, blank=True)
+    skillshots_dodged = models.IntegerField(null=True, blank=True)
+    ability_uses = models.IntegerField(null=True, blank=True)
+    laning_phase_gold_exp_advantage = models.IntegerField(null=True, blank=True)
+    early_laning_phase_gold_exp_advantage = models.IntegerField(null=True, blank=True)
+    # blocs JSON complets (null = participant pas encore repris)
+    challenges = models.JSONField(null=True, blank=True)
+    missions = models.JSONField(null=True, blank=True)
+    player_behavior = models.JSONField(null=True, blank=True)
+
     class Meta:
         unique_together = ('match', 'participant_id')
         indexes = [
@@ -194,6 +291,8 @@ class Team(models.Model):
     dragon_kills = models.IntegerField()
     tower_first = models.BooleanField()
     tower_kills = models.IntegerField()
+    # FIRST_BLOOD / FIRST_TURRET / EPIC_MONSTER_KILL (featState) ; null = pas encore repris
+    feats = models.JSONField(null=True, blank=True)
 
     class Meta:
         unique_together = ('match', 'team_id')
