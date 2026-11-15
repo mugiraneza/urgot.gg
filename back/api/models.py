@@ -1,11 +1,16 @@
 from django.db import models
+from django.db.models import TextField
+from django.db.models.functions import Cast, Upper
 from django.utils import timezone
+
+# Colonne JSON brute Riot (~45 Ko par match) : ne jamais la charger sans en avoir besoin.
+MATCH_RAW_FIELD = "objet_complet"
 
 
 class Match(models.Model):
     match_id = models.CharField(primary_key=True, max_length=100)
     game_region=models.CharField(max_length=10, null=True, blank=True, db_index=True)
-    game_creation = models.BigIntegerField()
+    game_creation = models.BigIntegerField(db_index=True)
     game_end_ts = models.BigIntegerField()
     game_duration = models.IntegerField()
     game_mode = models.CharField(max_length=50)
@@ -114,6 +119,11 @@ class Participant(models.Model):
 
     class Meta:
         unique_together = ('match', 'participant_id')
+        indexes = [
+            models.Index(fields=["puuid"], name="participant_puuid_idx"),
+            # Correspond exactement a `riot_name__iexact` sous PostgreSQL : UPPER(riot_name::text)
+            models.Index(Upper(Cast("riot_name", output_field=TextField())), name="participant_riot_upper_idx"),
+        ]
 
 
 class RankSnapshot(models.Model):
@@ -130,6 +140,10 @@ class RankSnapshot(models.Model):
 
     class Meta:
         unique_together = ("match", "puuid", "queue_type")
+        indexes = [
+            models.Index(fields=["puuid", "queue_type"], name="ranksnapshot_puuid_queue_idx"),
+            models.Index(Upper(Cast("riot_name", output_field=TextField())), name="ranksnapshot_riot_upper_idx"),
+        ]
 
 
 class TrackedSummoner(models.Model):

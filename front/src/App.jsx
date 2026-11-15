@@ -138,15 +138,40 @@ function safeReadJson(key) {
   }
 }
 
+function purgeMatchDetailCache() {
+  try {
+    const keysToRemove = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key && key.startsWith(MATCH_DETAIL_CACHE_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    return keysToRemove.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function safeWriteJson(key, value) {
   if (typeof window === "undefined") {
     return;
   }
 
+  const serialized = JSON.stringify(value);
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    window.localStorage.setItem(key, serialized);
   } catch {
-    // Ignore storage failures and keep the in-memory state.
+    // Quota plein : les details de match (les plus nombreux) sont sacrifiables,
+    // on les vide puis on retente une fois pour garder le cache dashboard/liste.
+    if (purgeMatchDetailCache()) {
+      try {
+        window.localStorage.setItem(key, serialized);
+      } catch {
+        // Ignore storage failures and keep the in-memory state.
+      }
+    }
   }
 }
 
@@ -589,7 +614,7 @@ export function App() {
                   {
                     label: "Parties",
                     data: modeStats.map((mode) => mode.total_games),
-                    backgroundColor: ["#5b8cff", "#9f7aea", "#f6ad55", "#63b3ed", "#f56565", "#68d391"],
+                    backgroundColor: ["#4c8dff", "#8b5cf6", "#ffd36b", "#3fd49b", "#f0575d", "#a8b4ff"],
                     borderWidth: 0,
                   },
                 ],
@@ -606,8 +631,8 @@ export function App() {
                   {
                     label: "CS/min",
                     data: csEvolution.slice(-12).map((entry) => entry.cs_per_min),
-                    borderColor: "#6ea8fe",
-                    backgroundColor: "rgba(110,168,254,0.14)",
+                    borderColor: "#8b5cf6",
+                    backgroundColor: "rgba(139,92,246,0.14)",
                     borderWidth: 2,
                     tension: 0.35,
                     fill: true,

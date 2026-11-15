@@ -166,15 +166,15 @@ export function MatchesTable({
                 >
                   <div className="match-summary">
                     <div className="match-lane">
-                      <span className="result-chip">{match.win ? "Victoire" : "Defaite"}</span>
-                      <small style={"align-content:center"}>{formatTime(match.end_time)}</small>
+                      <span className="result-chip">{match.game_ended_in_early_surrender ? "Remake" : match.win ? "Victoire" : "Défaite"}</span>
+                      <small>{formatTime(match.end_time)}</small>
                       <small>{match.queue_name}</small>
                     </div>
 
                     <div className="match-champion">
                       <div className="match-champion-title">
                         {match.champion_image_url ? (
-                          <img className="champion-icon champion-icon-lg" src={match.champion_image_url} alt={match.champion} />
+                          <img loading="lazy" decoding="async" className="champion-icon champion-icon-lg" src={match.champion_image_url} alt={match.champion} />
                         ) : null}
                         <div className="match-champion-heading">
                           <strong>{match.champion}</strong>
@@ -186,7 +186,7 @@ export function MatchesTable({
 
                     <div className="match-kda">
                       <strong>
-                        {match.kills}/{match.deaths}/{match.assists}
+                        {match.kills} / <span className="kda-deaths">{match.deaths}</span> / {match.assists}
                       </strong>
                       <span>{match.kda_ratio} KDA</span>
                     </div>
@@ -200,7 +200,7 @@ export function MatchesTable({
                     <div className="match-items">
                       {match.items.map((item, index) =>
                         item?.image_url ? (
-                          <img
+                          <img loading="lazy" decoding="async"
                             className="item-icon"
                             key={`${match.match_id}-${index}`}
                             src={item.image_url}

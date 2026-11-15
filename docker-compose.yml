@@ -61,7 +61,7 @@ services:
     command: >
       sh -c "
         python manage.py migrate &&
-        gunicorn back.wsgi:application --bind 0.0.0.0:8000 --workers=${API_GUNICORN_WORKERS:-2}
+        gunicorn back.wsgi:application --bind 0.0.0.0:8000 --workers=${API_GUNICORN_WORKERS:-2} --threads=${API_GUNICORN_THREADS:-4} --worker-class=gthread --timeout=60
       "
 
   import-worker:

@@ -78,7 +78,7 @@ function TeamRoster({ title, players }) {
           <div className="expanded-player" key={`${title}-${player.riot_name}`}>
             <div className="expanded-player-title">
               {player.champion_image_url ? (
-                <img className="champion-icon" src={player.champion_image_url} alt={player.champion} />
+                <img loading="lazy" decoding="async" className="champion-icon" src={player.champion_image_url} alt={player.champion} />
               ) : null}
               <div className="expanded-player-heading">
                 <strong>{player.riot_name}</strong>
